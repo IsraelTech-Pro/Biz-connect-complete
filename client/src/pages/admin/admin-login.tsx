@@ -151,14 +151,7 @@ export default function AdminLogin() {
               </Button>
             </form>
 
-            <div className="mt-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <h4 className="font-medium text-blue-900 mb-2">Admin Access Information</h4>
-              <div className="text-sm text-blue-700 space-y-1">
-                <p>• Default credentials can be updated directly in the database</p>
-                <p>• Password is stored as plain text for easy management</p>
-                <p>• Contact system administrator for access issues</p>
-              </div>
-            </div>
+            
           </CardContent>
         </Card>
 
