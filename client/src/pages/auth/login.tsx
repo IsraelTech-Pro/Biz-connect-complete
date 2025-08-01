@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,8 +15,15 @@ export default function Login() {
     password: ''
   });
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, user, token } = useAuth();
   const { toast } = useToast();
+
+  // Redirect to homepage when user becomes authenticated
+  useEffect(() => {
+    if (user && token) {
+      setLocation('/');
+    }
+  }, [user, token, setLocation]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +47,7 @@ export default function Login() {
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
-      setLocation('/');
+      // Redirect will happen automatically via useEffect when auth state updates
     } catch (error) {
       toast({
         title: "Login Failed",
