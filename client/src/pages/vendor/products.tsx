@@ -449,7 +449,7 @@ export default function VendorProducts() {
                 type="button"
                 onClick={handleSubmit}
                 disabled={isSubmitting}
-                className="bg-orange-500 hover:bg-orange-600"
+                className="btn-orange-primary"
               >
                 {isSubmitting ? 'Saving...' : editingProduct ? 'Update Product' : 'Create Product'}
               </Button>
@@ -470,7 +470,7 @@ export default function VendorProducts() {
             <p className="text-gray-500 mb-6">Start building your store by adding your first product</p>
             <Button
               onClick={() => setIsDialogOpen(true)}
-              className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white"
+              className="btn-orange-primary"
             >
               <Plus className="w-4 h-4 mr-2" />
               Add Your First Product

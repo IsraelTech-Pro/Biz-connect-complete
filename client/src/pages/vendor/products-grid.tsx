@@ -177,7 +177,7 @@ export default function VendorProductsGrid() {
               </div>
             </div>
             <Link href="/vendor/products">
-              <Button className="bg-orange-500 hover:bg-orange-600 text-white">
+              <Button className="btn-orange-primary">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Product
               </Button>
