@@ -518,7 +518,7 @@ export default function VendorDetail() {
                       </div>
                       <div className="flex items-center">
                         <Store className="w-4 h-4 mr-2" />
-                        Active since 2024
+                        Active since {vendor.created_at ? new Date(vendor.created_at).getFullYear() : '2024'}
                       </div>
                     </div>
                   </div>

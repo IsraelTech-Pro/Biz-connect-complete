@@ -14,6 +14,8 @@ VendorHub is a mobile-friendly multi-vendor eCommerce platform designed for the 
 - **BizConnect Logo Integration**: Implemented comprehensive branding with BizConnect logo across entire application including header navigation, login/register pages, admin login, homepage hero section, and favicon
 - **University Name Correction**: Updated all references to reflect correct university name "Koforidua Technical University" throughout documentation and application materials
 - **Complete Application Documentation**: Created comprehensive guide explaining all platform functionalities including admin dashboard, student business dashboard, and all platform sections (Products, Mentorship, Resources, Community)
+- **Login Redirect Fix**: Fixed authentication flow where users remained on login page after successful authentication - added automatic redirect to homepage when authentication state updates
+- **Real Registration Date Display**: Updated vendor detail pages to fetch and display actual business registration date from database instead of hardcoded "Active since 2024"
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
