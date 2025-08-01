@@ -680,10 +680,7 @@ export default function AdminDashboard() {
                   <label className="text-sm font-medium text-gray-600">Total Products</label>
                   <p className="text-lg font-semibold text-gray-900">{selectedItem.total_products}</p>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-600">Total Sales</label>
-                  <p className="text-lg font-semibold text-gray-900">₵{selectedItem.total_sales}</p>
-                </div>
+                
                 <div className="col-span-2">
                   <label className="text-sm font-medium text-gray-600">Joined Date</label>
                   <p className="text-gray-900">{new Date(selectedItem.created_at).toLocaleDateString()}</p>
