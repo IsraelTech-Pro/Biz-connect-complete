@@ -3427,7 +3427,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/quick-sales', upload.array('productImages', 20), async (req, res) => {
+  app.post('/api/quick-sales', upload.any(), async (req, res) => {
     try {
       const { title, description, seller_name, seller_contact, seller_email, ends_at, products: productsJson, reserve_price } = req.body;
       
@@ -3440,6 +3440,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (products.length > 20) {
         return res.status(400).json({ message: 'Maximum 20 products allowed per quick sale' });
       }
+      
+      // Process uploaded images
+      const files = req.files as Express.Multer.File[] || [];
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_KEY;
+      
+      // Group images by product index
+      const productImages: { [key: number]: string[] } = {};
+      
+      for (const file of files) {
+        const match = file.fieldname.match(/product_(\d+)_images/);
+        if (match) {
+          const productIndex = parseInt(match[1]);
+          
+          let imageUrl = '';
+          
+          // Try Supabase upload first
+          if (supabaseUrl && supabaseKey) {
+            try {
+              const supabase = createClient(supabaseUrl, supabaseKey);
+              const filename = `quick-sale/${Date.now()}-${file.originalname}`;
+              
+              const { data, error } = await supabase.storage
+                .from('product-images')
+                .upload(filename, file.buffer, {
+                  contentType: file.mimetype,
+                  upsert: false
+                });
+              
+              if (!error && data) {
+                const { data: { publicUrl } } = supabase.storage
+                  .from('product-images')
+                  .getPublicUrl(data.path);
+                imageUrl = publicUrl;
+              }
+            } catch (err) {
+              console.warn('Supabase upload failed, using local storage', err);
+            }
+          }
+          
+          // Fallback to local storage if Supabase fails
+          if (!imageUrl) {
+            const filename = `${Date.now()}-${file.originalname}`;
+            const filepath = path.join(uploadDir, filename);
+            fs.writeFileSync(filepath, file.buffer);
+            imageUrl = `/uploads/${filename}`;
+          }
+          
+          if (!productImages[productIndex]) {
+            productImages[productIndex] = [];
+          }
+          productImages[productIndex].push(imageUrl);
+        }
+      }
+      
+      // Add images to products
+      const productsWithImages = products.map((product: any, index: number) => ({
+        ...product,
+        images: productImages[index] || []
+      }));
       
       const quickSaleData = {
         title,
@@ -3455,7 +3515,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const validatedQuickSale = insertQuickSaleSchema.parse(quickSaleData);
       
-      const sale = await storage.createQuickSale(validatedQuickSale, products);
+      const sale = await storage.createQuickSale(validatedQuickSale, productsWithImages);
       
       res.status(201).json(sale);
     } catch (error: any) {

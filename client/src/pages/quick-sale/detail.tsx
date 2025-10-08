@@ -12,10 +12,10 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface QuickSaleProduct {
   id: string;
-  name: string;
+  title: string;
   description: string;
   condition: string;
-  image_url: string | null;
+  images: string[] | null;
 }
 
 interface QuickSaleBid {
@@ -218,7 +218,28 @@ export default function QuickSaleDetail() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {sale.products.map((product) => (
                   <Card key={product.id} className="p-4">
-                    <h3 className="font-semibold mb-2">{product.name}</h3>
+                    {product.images && product.images.length > 0 && (
+                      <div className="mb-3">
+                        <img
+                          src={product.images[0]}
+                          alt={product.title}
+                          className="w-full h-40 object-cover rounded"
+                        />
+                        {product.images.length > 1 && (
+                          <div className="flex gap-2 mt-2 overflow-x-auto">
+                            {product.images.slice(1).map((img, idx) => (
+                              <img
+                                key={idx}
+                                src={img}
+                                alt={`${product.title} ${idx + 2}`}
+                                className="w-16 h-16 object-cover rounded cursor-pointer hover:opacity-75"
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <h3 className="font-semibold mb-2">{product.title}</h3>
                     <p className="text-sm text-gray-600 mb-2">{product.description}</p>
                     <Badge variant="outline">{product.condition}</Badge>
                   </Card>

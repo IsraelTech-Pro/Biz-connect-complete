@@ -13,12 +13,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Package } from "lucide-react";
+import { Plus, Trash2, Package, Upload, X } from "lucide-react";
 
 interface Product {
-  name: string;
+  title: string;
   description: string;
   condition: string;
+  images: File[];
 }
 
 export default function CreateQuickSale() {
@@ -37,7 +38,7 @@ export default function CreateQuickSale() {
 
   // Products
   const [products, setProducts] = useState<Product[]>([
-    { name: "", description: "", condition: "new" }
+    { title: "", description: "", condition: "new", images: [] }
   ]);
 
   const addProduct = () => {
@@ -49,7 +50,7 @@ export default function CreateQuickSale() {
       });
       return;
     }
-    setProducts([...products, { name: "", description: "", condition: "new" }]);
+    setProducts([...products, { title: "", description: "", condition: "new", images: [] }]);
   };
 
   const removeProduct = (index: number) => {
@@ -64,9 +65,35 @@ export default function CreateQuickSale() {
     setProducts(products.filter((_, i) => i !== index));
   };
 
-  const updateProduct = (index: number, field: keyof Product, value: string) => {
+  const updateProduct = (index: number, field: keyof Omit<Product, 'images'>, value: string) => {
     const updatedProducts = [...products];
     updatedProducts[index][field] = value;
+    setProducts(updatedProducts);
+  };
+
+  const handleImageUpload = (index: number, files: FileList | null) => {
+    if (!files) return;
+    
+    const updatedProducts = [...products];
+    const currentImages = updatedProducts[index].images;
+    const newImages = Array.from(files);
+    
+    if (currentImages.length + newImages.length > 5) {
+      toast({
+        title: "Too Many Images",
+        description: "Maximum 5 images per product",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    updatedProducts[index].images = [...currentImages, ...newImages];
+    setProducts(updatedProducts);
+  };
+
+  const removeImage = (productIndex: number, imageIndex: number) => {
+    const updatedProducts = [...products];
+    updatedProducts[productIndex].images = updatedProducts[productIndex].images.filter((_, i) => i !== imageIndex);
     setProducts(updatedProducts);
   };
 
@@ -83,7 +110,7 @@ export default function CreateQuickSale() {
       return;
     }
 
-    const hasInvalidProducts = products.some(p => !p.name || !p.description);
+    const hasInvalidProducts = products.some(p => !p.title || !p.description);
     if (hasInvalidProducts) {
       toast({
         title: "Invalid Products",
@@ -116,7 +143,21 @@ export default function CreateQuickSale() {
       if (reservePrice) {
         formData.append('reserve_price', reservePrice);
       }
-      formData.append('products', JSON.stringify(products));
+      
+      // Add products without images to JSON
+      const productsData = products.map(p => ({
+        title: p.title,
+        description: p.description,
+        condition: p.condition
+      }));
+      formData.append('products', JSON.stringify(productsData));
+      
+      // Add product images
+      products.forEach((product, index) => {
+        product.images.forEach((image) => {
+          formData.append(`product_${index}_images`, image);
+        });
+      });
 
       const response = await fetch('/api/quick-sales', {
         method: 'POST',
@@ -289,13 +330,13 @@ export default function CreateQuickSale() {
 
                   <div className="space-y-3">
                     <div>
-                      <Label htmlFor={`product_name_${index}`}>Product Name *</Label>
+                      <Label htmlFor={`product_title_${index}`}>Product Title *</Label>
                       <Input
-                        id={`product_name_${index}`}
-                        value={product.name}
-                        onChange={(e) => updateProduct(index, 'name', e.target.value)}
+                        id={`product_title_${index}`}
+                        value={product.title}
+                        onChange={(e) => updateProduct(index, 'title', e.target.value)}
                         placeholder="e.g., iPhone 12 Pro"
-                        data-testid={`input-product-name-${index}`}
+                        data-testid={`input-product-title-${index}`}
                       />
                     </div>
 
@@ -328,6 +369,47 @@ export default function CreateQuickSale() {
                           <SelectItem value="poor">Poor</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div>
+                      <Label>Product Images (Up to 5)</Label>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={(e) => handleImageUpload(index, e.target.files)}
+                            className="flex-1"
+                            data-testid={`input-product-images-${index}`}
+                          />
+                          <Upload className="h-5 w-5 text-gray-400" />
+                        </div>
+                        {product.images.length > 0 && (
+                          <div className="grid grid-cols-3 gap-2">
+                            {product.images.map((image, imgIndex) => (
+                              <div key={imgIndex} className="relative group">
+                                <img
+                                  src={URL.createObjectURL(image)}
+                                  alt={`Product ${index + 1} image ${imgIndex + 1}`}
+                                  className="w-full h-20 object-cover rounded"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeImage(index, imgIndex)}
+                                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  data-testid={`button-remove-image-${index}-${imgIndex}`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-xs text-gray-500">
+                          {product.images.length}/5 images uploaded
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </Card>

@@ -190,8 +190,9 @@ export const quick_sale_products = pgTable("quick_sale_products", {
   id: uuid("id").primaryKey().defaultRandom(),
   quick_sale_id: uuid("quick_sale_id").notNull().references(() => quick_sales.id, { onDelete: 'cascade' }),
   title: text("title").notNull(),
-  description: text("description"),
-  image_url: text("image_url"),
+  description: text("description").notNull(),
+  condition: text("condition").notNull().default("new"),
+  images: text("images").array(),
   estimated_value: decimal("estimated_value", { precision: 10, scale: 2 }),
   created_at: timestamp("created_at").defaultNow(),
 });
@@ -270,6 +271,12 @@ export const insertQuickSaleSchema = createInsertSchema(quick_sales).omit({
 export const insertQuickSaleProductSchema = createInsertSchema(quick_sale_products).omit({
   id: true,
   created_at: true,
+  quick_sale_id: true,
+}).extend({
+  title: z.string().min(2, "Product title is required"),
+  description: z.string().min(3, "Product description is required"),
+  condition: z.string(),
+  images: z.array(z.string()).max(5, "Maximum 5 images allowed").optional(),
 });
 
 export const insertQuickSaleBidSchema = createInsertSchema(quick_sale_bids).omit({

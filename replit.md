@@ -20,7 +20,7 @@ VendorHub is a mobile-friendly multi-vendor eCommerce platform designed for the 
 - **Complete Application Documentation**: Created comprehensive guide explaining all platform functionalities including admin dashboard, student business dashboard, and all platform sections (Products, Mentorship, Resources, Community)
 - **Login Redirect Fix**: Fixed authentication flow where users remained on login page after successful authentication - added automatic redirect to homepage when authentication state updates
 - **Real Registration Date Display**: Updated vendor detail pages to fetch and display actual business registration date from database instead of hardcoded "Active since 2024"
-- **Quick Sale/Auction System**: Implemented complete auction functionality allowing anyone to list up to 20 items for time-limited bidding without business registration. Features include countdown timers, real-time bid tracking, contact-based winner notification, and public auction browsing
+- **Quick Sale/Auction System**: Implemented complete auction functionality allowing anyone to list up to 20 items for time-limited bidding without business registration. Features include countdown timers, real-time bid tracking, contact-based winner notification, public auction browsing, and product image uploads (up to 5 images per product with Supabase storage and local fallback)
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -60,7 +60,7 @@ The platform features a Jumia-inspired design with a clean aesthetic.
 - **Product Management**: 3-step creation wizard, multi-image support, and separation of vendor vs. admin fields (promotional/SEO fields are admin-only).
 - **Store Sharing**: QR code generation and URL sharing for vendor stores.
 - **Order Management**: Comprehensive vendor orders page with filtering, search, status management, and analytics dashboard.
-- **Quick Sale/Auction System**: Time-limited auctions accessible without registration. Features include countdown timers, real-time bidding, product listings (up to 20 items per sale), bid tracking with contact details, and automatic winner determination when countdown ends.
+- **Quick Sale/Auction System**: Time-limited auctions accessible without registration. Features include countdown timers, real-time bidding, product listings (up to 20 items per sale with up to 5 images each), bid tracking with contact details, automatic winner determination when countdown ends, and image storage via Supabase with local fallback support.
 
 ## External Dependencies
 
