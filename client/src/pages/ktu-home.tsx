@@ -5,7 +5,7 @@ import {
   Users, Store, BookOpen, MessageCircle, TrendingUp, Award, 
   ArrowRight, ChevronRight, Building2, Lightbulb, Network,
   Star, Heart, Eye, Clock, Briefcase, GraduationCap, Target,
-  Rocket, Handshake, Globe, Shield, Zap
+  Rocket, Handshake, Globe, Shield, Zap, Timer, Gavel, Package
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -100,6 +100,87 @@ const ProductCard = ({ product }: { product: any }) => {
   );
 };
 
+// Quick Sale Card Component
+const QuickSaleCard = ({ sale }: { sale: any }) => {
+  const [timeLeft, setTimeLeft] = useState<string>("");
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date().getTime();
+      const end = new Date(sale.ends_at).getTime();
+      const distance = end - now;
+
+      if (distance < 0) {
+        setTimeLeft("Ended");
+        clearInterval(timer);
+        return;
+      }
+
+      const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      
+      if (days > 0) {
+        setTimeLeft(`${days}d ${hours}h`);
+      } else {
+        setTimeLeft(`${hours}h left`);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [sale.ends_at]);
+
+  return (
+    <Link href={`/quick-sale/${sale.id}`} className="block h-full">
+      <div className="ktu-card animate-card-lift h-full group bg-gradient-to-br from-orange-50 to-white">
+        <div className="relative">
+          <div className="absolute top-2 right-2 z-10">
+            <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full font-medium flex items-center gap-1">
+              <Timer className="h-3 w-3" />
+              {timeLeft}
+            </span>
+          </div>
+          <div className="absolute top-2 left-2 z-10">
+            <span className="bg-ktu-orange text-white text-xs px-2 py-1 rounded font-medium flex items-center gap-1">
+              <Gavel className="h-3 w-3" />
+              Live
+            </span>
+          </div>
+        </div>
+        <div className="p-4">
+          <h4 className="font-bold text-ktu-deep-blue text-base mb-2 line-clamp-1">{sale.title}</h4>
+          <p className="text-xs text-ktu-dark-grey mb-3 line-clamp-2">{sale.description}</p>
+          
+          <div className="space-y-2 mb-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-ktu-dark-grey flex items-center gap-1">
+                <Package className="h-3 w-3" />
+                Items
+              </span>
+              <span className="font-semibold text-ktu-deep-blue">{sale.productsCount || 0}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-ktu-dark-grey flex items-center gap-1">
+                <Gavel className="h-3 w-3" />
+                Bids
+              </span>
+              <span className="font-semibold text-ktu-deep-blue">{sale.bidsCount || 0}</span>
+            </div>
+          </div>
+
+          <div className="border-t pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-ktu-dark-grey">Highest Bid</span>
+              <span className="text-lg font-bold text-ktu-orange">
+                {sale.highestBid ? `GH₵${sale.highestBid}` : 'No bids'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+};
+
 export default function KTUHome() {
   const [currentSlide, setCurrentSlide] = useState(0);
 
@@ -125,6 +206,12 @@ export default function KTUHome() {
       // Randomize the products for homepage display
       return data.sort(() => Math.random() - 0.5);
     }
+  });
+
+  // Fetch Quick Sales/Auctions
+  const { data: quickSalesData = [], isLoading: quickSalesLoading } = useQuery<any[]>({
+    queryKey: ['/api/quick-sales'],
+    staleTime: 30000, // Refetch every 30 seconds to keep bids count updated
   });
 
   // Fetch platform statistics
@@ -339,6 +426,48 @@ export default function KTUHome() {
           )}
         </div>
       </section>
+
+      {/* Quick Sale / Auction Section */}
+      {quickSalesData.length > 0 && (
+        <section className="container mx-auto px-4 py-8 bg-gradient-to-r from-orange-50 to-white rounded-xl">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-ktu-deep-blue flex items-center gap-2">
+                <Gavel className="h-6 w-6 text-ktu-orange" />
+                Live Auctions & Quick Sales
+              </h2>
+              <p className="text-sm text-ktu-dark-grey mt-1">
+                Limited-time deals - Place your bids now!
+              </p>
+            </div>
+            <Link href="/quick-sale">
+              <Button className="bg-ktu-orange hover:bg-ktu-orange/90 text-white">
+                View All Auctions <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {quickSalesLoading ? (
+              // Loading skeleton
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="animate-pulse">
+                  <div className="bg-gray-200 rounded-lg h-52 mb-2"></div>
+                  <div className="bg-gray-200 rounded h-4 mb-1"></div>
+                  <div className="bg-gray-200 rounded h-3"></div>
+                </div>
+              ))
+            ) : (
+              quickSalesData
+                .filter(sale => sale.status === 'active')
+                .slice(0, 4)
+                .map((sale) => (
+                  <QuickSaleCard key={sale.id} sale={sale} />
+                ))
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Categories Section */}
       <section className="container mx-auto px-4 py-8">

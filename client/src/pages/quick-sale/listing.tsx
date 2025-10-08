@@ -63,6 +63,8 @@ function CountdownTimer({ endsAt }: { endsAt: string }) {
 export default function QuickSaleListing() {
   const { data: quickSales, isLoading } = useQuery<QuickSale[]>({
     queryKey: ['/api/quick-sales'],
+    staleTime: 30000, // Refetch every 30 seconds to keep bids count updated
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
   });
 
   const activeSales = quickSales?.filter(sale => sale.status === 'active') || [];
