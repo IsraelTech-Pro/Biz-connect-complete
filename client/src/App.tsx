@@ -91,61 +91,18 @@ function Router() {
       <Route path="/auth/login" component={Login} />
       <Route path="/auth/register" component={Register} />
       
-      {/* All other routes require authentication */}
-      <Route path="/">
-        <ProtectedRoute>
-          <KTUHome />
-        </ProtectedRoute>
-      </Route>
+      {/* Public browsing routes - no authentication required */}
+      <Route path="/" component={KTUHome} />
+      <Route path="/mentorship" component={MentorshipHub} />
+      <Route path="/resources" component={BusinessResources} />
+      <Route path="/resources/:id" component={ResourceDetail} />
+      <Route path="/community" component={CommunityForum} />
+      <Route path="/products" component={ProductsListing} />
+      <Route path="/products-listing" component={ProductsListing} />
+      <Route path="/products/:id" component={ProductDetail} />
+      <Route path="/vendors" component={Vendors} />
       
-      <Route path="/mentorship">
-        <ProtectedRoute>
-          <MentorshipHub />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/resources">
-        <ProtectedRoute>
-          <BusinessResources />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/resources/:id">
-        <ProtectedRoute>
-          <ResourceDetail />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/community">
-        <ProtectedRoute>
-          <CommunityForum />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/products">
-        <ProtectedRoute>
-          <ProductsListing />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/products-listing">
-        <ProtectedRoute>
-          <ProductsListing />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/products/:id">
-        <ProtectedRoute>
-          <ProductDetail />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/vendors">
-        <ProtectedRoute>
-          <Vendors />
-        </ProtectedRoute>
-      </Route>
-      
+      {/* Protected commerce routes - require authentication */}
       <Route path="/cart">
         <ProtectedRoute>
           <Cart />
@@ -176,6 +133,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
+      {/* Protected vendor routes - require authentication to become/manage as seller */}
       <Route path="/vendor/register">
         <ProtectedRoute>
           <VendorRegister />
@@ -187,8 +145,6 @@ function Router() {
           <VendorDashboard />
         </ProtectedRoute>
       </Route>
-      
-
       
       <Route path="/vendor/products">
         <ProtectedRoute>
@@ -220,88 +176,26 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      {/* Student Business pages */}
-      <Route path="/student-businesses">
-        <ProtectedRoute>
-          <VendorStores />
-        </ProtectedRoute>
-      </Route>
+      {/* Public browsing pages - no authentication required */}
+      <Route path="/student-businesses" component={VendorStores} />
+      <Route path="/business/:id" component={VendorDetail} />
+      <Route path="/browse-products" component={BrowseProducts} />
+      <Route path="/track-order" component={TrackOrder} />
+      <Route path="/return-policy" component={ReturnPolicy} />
+      <Route path="/customer-support" component={CustomerSupport} />
       
-      <Route path="/business/:id">
-        <ProtectedRoute>
-          <VendorDetail />
-        </ProtectedRoute>
-      </Route>
+      {/* Public vendor information pages */}
+      <Route path="/sell-on-vendorhub" component={SellOnVendorHub} />
+      <Route path="/vendor-guidelines" component={VendorGuidelines} />
+      <Route path="/payout-information" component={PayoutInformation} />
+      <Route path="/vendor-support" component={VendorSupport} />
       
-      {/* Browse Products */}
-      <Route path="/browse-products">
-        <ProtectedRoute>
-          <BrowseProducts />
-        </ProtectedRoute>
-      </Route>
+      {/* Public policy pages */}
+      <Route path="/payment-options" component={PaymentOptions} />
+      <Route path="/mobile-money" component={MobileMoney} />
       
-      <Route path="/track-order">
-        <ProtectedRoute>
-          <TrackOrder />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/return-policy">
-        <ProtectedRoute>
-          <ReturnPolicy />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/customer-support">
-        <ProtectedRoute>
-          <CustomerSupport />
-        </ProtectedRoute>
-      </Route>
-      
-      {/* Vendor pages */}
-      <Route path="/sell-on-vendorhub">
-        <ProtectedRoute>
-          <SellOnVendorHub />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/vendor-guidelines">
-        <ProtectedRoute>
-          <VendorGuidelines />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/payout-information">
-        <ProtectedRoute>
-          <PayoutInformation />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/vendor-support">
-        <ProtectedRoute>
-          <VendorSupport />
-        </ProtectedRoute>
-      </Route>
-      
-      {/* Policy pages */}
-      <Route path="/payment-options">
-        <ProtectedRoute>
-          <PaymentOptions />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/mobile-money">
-        <ProtectedRoute>
-          <MobileMoney />
-        </ProtectedRoute>
-      </Route>
-      
-      {/* Contact page */}
-      <Route path="/contact-vendor">
-        <ProtectedRoute>
-          <ContactVendor />
-        </ProtectedRoute>
-      </Route>
+      {/* Public contact page */}
+      <Route path="/contact-vendor" component={ContactVendor} />
       
       <Route component={NotFound} />
     </Switch>

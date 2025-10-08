@@ -322,6 +322,14 @@ export const Header = () => {
                           Admin Panel
                         </Link>
                       )}
+                      {user.role !== "vendor" && user.role !== "admin" && (
+                        <Link
+                          to="/vendor/register"
+                          className="block px-4 py-2 text-sm text-orange-600 hover:bg-orange-50 font-medium"
+                        >
+                          Become a Seller
+                        </Link>
+                      )}
                       <button
                         onClick={logout}
                         className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -383,37 +391,48 @@ export const Header = () => {
         {/* Desktop Navigation */}
         <nav className="bg-ktu-section-gradient border-b border-gray-200 hidden md:block">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-center space-x-8 py-3">
-              <Link
-                to="/student-businesses"
-                className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
-              >
-                Student Businesses
-              </Link>
-              <Link
-                to="/products-listing"
-                className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
-              >
-                Products
-              </Link>
-              <Link
-                to="/mentorship"
-                className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
-              >
-                Mentorship
-              </Link>
-              <Link
-                to="/resources"
-                className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
-              >
-                Resources
-              </Link>
-              <Link
-                to="/community"
-                className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
-              >
-                Community
-              </Link>
+            <div className="flex items-center justify-between py-3">
+              <div className="flex items-center justify-center space-x-8 flex-1">
+                <Link
+                  to="/student-businesses"
+                  className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
+                >
+                  Student Businesses
+                </Link>
+                <Link
+                  to="/products-listing"
+                  className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
+                >
+                  Products
+                </Link>
+                <Link
+                  to="/mentorship"
+                  className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
+                >
+                  Mentorship
+                </Link>
+                <Link
+                  to="/resources"
+                  className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
+                >
+                  Resources
+                </Link>
+                <Link
+                  to="/community"
+                  className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
+                >
+                  Community
+                </Link>
+              </div>
+              {(!user || (user.role !== "vendor" && user.role !== "admin")) && (
+                <Link
+                  to={user ? "/vendor/register" : "/sell-on-vendorhub"}
+                  className="bg-ktu-orange text-white px-4 py-2 rounded-md hover:bg-orange-600 transition-colors font-medium text-sm"
+                  data-testid="link-become-seller"
+                >
+                  Become a Seller
+                </Link>
+              )}
             </div>
           </div>
         </nav>
@@ -476,6 +495,17 @@ export const Header = () => {
                       ? "Business Dashboard"
                       : "Admin Dashboard"}
                   </span>
+                </Link>
+              )}
+              {(!user || (user.role !== "vendor" && user.role !== "admin")) && (
+                <Link
+                  to={user ? "/vendor/register" : "/sell-on-vendorhub"}
+                  className="flex items-center space-x-3 px-3 py-2 rounded-lg bg-ktu-orange text-white hover:bg-orange-600"
+                  onClick={() => setIsMenuOpen(false)}
+                  data-testid="link-become-seller-mobile"
+                >
+                  <Store className="h-5 w-5" />
+                  <span className="text-sm font-medium">Become a Seller</span>
                 </Link>
               )}
               <Link
