@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, insertProductSchema, insertOrderSchema, insertSupportRequestSchema, insertVendorSupportRequestSchema, insertPaymentSchema, insertDiscussionSchema, insertCommentSchema, insertLikeSchema } from "@shared/schema";
+import { insertUserSchema, insertProductSchema, insertOrderSchema, insertSupportRequestSchema, insertVendorSupportRequestSchema, insertPaymentSchema, insertDiscussionSchema, insertCommentSchema, insertLikeSchema, insertQuickSaleSchema, insertQuickSaleProductSchema, insertQuickSaleBidSchema } from "@shared/schema";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import multer from "multer";
@@ -3373,6 +3373,161 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error deleting product rating:', error);
       res.status(500).json({ message: 'Failed to delete product rating' });
+    }
+  });
+
+  // Quick Sale / Auction routes
+  app.get('/api/quick-sales', async (req, res) => {
+    try {
+      const { status } = req.query;
+      const sales = await storage.getQuickSales(status as any);
+      
+      const salesWithDetails = await Promise.all(
+        sales.map(async (sale) => {
+          const products = await storage.getQuickSaleProducts(sale.id);
+          const bids = await storage.getQuickSaleBids(sale.id);
+          const highestBid = bids[0];
+          
+          return {
+            ...sale,
+            productsCount: products.length,
+            bidsCount: bids.length,
+            highestBid: highestBid ? Number(highestBid.bid_amount) : null
+          };
+        })
+      );
+      
+      res.json(salesWithDetails);
+    } catch (error) {
+      console.error('Error getting quick sales:', error);
+      res.status(500).json({ message: 'Failed to get quick sales' });
+    }
+  });
+
+  app.get('/api/quick-sales/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const sale = await storage.getQuickSale(id);
+      
+      if (!sale) {
+        return res.status(404).json({ message: 'Quick sale not found' });
+      }
+      
+      const products = await storage.getQuickSaleProducts(id);
+      const bids = await storage.getQuickSaleBids(id);
+      
+      res.json({
+        ...sale,
+        products,
+        bids
+      });
+    } catch (error) {
+      console.error('Error getting quick sale:', error);
+      res.status(500).json({ message: 'Failed to get quick sale' });
+    }
+  });
+
+  app.post('/api/quick-sales', upload.array('productImages', 20), async (req, res) => {
+    try {
+      const { title, description, seller_name, seller_contact, seller_email, ends_at, products: productsJson, reserve_price } = req.body;
+      
+      const products = JSON.parse(productsJson || '[]');
+      
+      if (products.length === 0) {
+        return res.status(400).json({ message: 'At least one product is required' });
+      }
+      
+      if (products.length > 20) {
+        return res.status(400).json({ message: 'Maximum 20 products allowed per quick sale' });
+      }
+      
+      const quickSaleData = {
+        title,
+        description,
+        seller_name,
+        seller_contact,
+        seller_email: seller_email || null,
+        starts_at: new Date(),
+        ends_at: new Date(ends_at),
+        status: 'active' as const,
+        reserve_price: reserve_price || null
+      };
+      
+      const validatedQuickSale = insertQuickSaleSchema.parse(quickSaleData);
+      
+      const sale = await storage.createQuickSale(validatedQuickSale, products);
+      
+      res.status(201).json(sale);
+    } catch (error: any) {
+      console.error('Error creating quick sale:', error);
+      res.status(400).json({ message: error.message || 'Failed to create quick sale' });
+    }
+  });
+
+  app.post('/api/quick-sales/:id/bids', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { bidder_name, bid_amount, contact_number } = req.body;
+      
+      const sale = await storage.getQuickSale(id);
+      
+      if (!sale) {
+        return res.status(404).json({ message: 'Quick sale not found' });
+      }
+      
+      if (sale.status !== 'active') {
+        return res.status(400).json({ message: 'This quick sale is not active' });
+      }
+      
+      if (new Date(sale.ends_at) < new Date()) {
+        return res.status(400).json({ message: 'This quick sale has ended' });
+      }
+      
+      const highestBid = await storage.getHighestBid(id);
+      const bidAmountNum = Number(bid_amount);
+      
+      if (highestBid && bidAmountNum <= Number(highestBid.bid_amount)) {
+        return res.status(400).json({ 
+          message: `Bid must be higher than current highest bid of GH₵${highestBid.bid_amount}` 
+        });
+      }
+      
+      const bidData = {
+        quick_sale_id: id,
+        bidder_name,
+        bid_amount: bid_amount.toString(),
+        contact_number
+      };
+      
+      const validatedBid = insertQuickSaleBidSchema.parse(bidData);
+      const bid = await storage.createQuickSaleBid(validatedBid);
+      
+      res.status(201).json(bid);
+    } catch (error: any) {
+      console.error('Error placing bid:', error);
+      res.status(400).json({ message: error.message || 'Failed to place bid' });
+    }
+  });
+
+  app.post('/api/quick-sales/:id/finalize', async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      const sale = await storage.getQuickSale(id);
+      
+      if (!sale) {
+        return res.status(404).json({ message: 'Quick sale not found' });
+      }
+      
+      if (sale.status === 'ended') {
+        return res.status(400).json({ message: 'Quick sale already finalized' });
+      }
+      
+      const finalizedSale = await storage.finalizeQuickSale(id);
+      res.json(finalizedSale);
+    } catch (error) {
+      console.error('Error finalizing quick sale:', error);
+      res.status(500).json({ message: 'Failed to finalize quick sale' });
     }
   });
 
