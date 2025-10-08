@@ -166,7 +166,7 @@ export default function QuickSaleDetail() {
     );
   }
 
-  const highestBid = sale.bids[0];
+  const highestBid = sale.bids && sale.bids.length > 0 ? sale.bids[0] : null;
   const isActive = sale.status === 'active' && new Date(sale.ends_at) > new Date();
 
   return (
