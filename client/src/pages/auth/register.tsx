@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
@@ -16,7 +15,7 @@ export default function Register() {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'buyer',
+    role: 'vendor',
     full_name: '',
     store_name: '',
     store_description: '',
@@ -108,8 +107,8 @@ export default function Register() {
               className="w-16 h-16"
             />
           </div>
-          <CardTitle className="text-2xl font-bold text-ktu-deep-blue">Join KTU BizConnect</CardTitle>
-          <p className="text-gray-600">For KTU students only - Create your account with your official KTU email</p>
+          <CardTitle className="text-2xl font-bold text-ktu-deep-blue">Become a Seller</CardTitle>
+          <p className="text-gray-600">Register as a seller - For KTU students only</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -163,59 +162,37 @@ export default function Register() {
             </div>
 
             <div>
-              <Label>Account Type</Label>
-              <RadioGroup
-                value={formData.role}
-                onValueChange={(value) => handleChange('role', value)}
-                className="mt-2"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="buyer" id="buyer" />
-                  <Label htmlFor="buyer">Buyer - I want to shop</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="vendor" id="vendor" />
-                  <Label htmlFor="vendor">Vendor - I want to sell</Label>
-                </div>
-              </RadioGroup>
+              <Label htmlFor="store_name">Store Name</Label>
+              <Input
+                id="store_name"
+                placeholder="Enter your store name"
+                value={formData.store_name}
+                onChange={(e) => handleChange('store_name', e.target.value)}
+                required
+              />
             </div>
 
-            {formData.role === 'vendor' && (
-              <>
-                <div>
-                  <Label htmlFor="store_name">Store Name</Label>
-                  <Input
-                    id="store_name"
-                    placeholder="Enter your store name"
-                    value={formData.store_name}
-                    onChange={(e) => handleChange('store_name', e.target.value)}
-                    required
-                  />
-                </div>
+            <div>
+              <Label htmlFor="store_description">Store Description</Label>
+              <Textarea
+                id="store_description"
+                placeholder="Describe your store and products"
+                value={formData.store_description}
+                onChange={(e) => handleChange('store_description', e.target.value)}
+                rows={3}
+              />
+            </div>
 
-                <div>
-                  <Label htmlFor="store_description">Store Description</Label>
-                  <Textarea
-                    id="store_description"
-                    placeholder="Describe your store and products"
-                    value={formData.store_description}
-                    onChange={(e) => handleChange('store_description', e.target.value)}
-                    rows={3}
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="momo_number">MTN Mobile Money Number</Label>
-                  <Input
-                    id="momo_number"
-                    placeholder="024XXXXXXX"
-                    value={formData.momo_number}
-                    onChange={(e) => handleChange('momo_number', e.target.value)}
-                    required
-                  />
-                </div>
-              </>
-            )}
+            <div>
+              <Label htmlFor="momo_number">MTN Mobile Money Number</Label>
+              <Input
+                id="momo_number"
+                placeholder="024XXXXXXX"
+                value={formData.momo_number}
+                onChange={(e) => handleChange('momo_number', e.target.value)}
+                required
+              />
+            </div>
 
             <Button 
               type="submit" 
