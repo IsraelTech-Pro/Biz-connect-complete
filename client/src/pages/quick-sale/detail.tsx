@@ -93,7 +93,7 @@ export default function QuickSaleDetail() {
   const [contactNumber, setContactNumber] = useState("");
 
   const { data: sale, isLoading } = useQuery<QuickSaleDetail>({
-    queryKey: ['/api/quick-sales', id],
+    queryKey: [`/api/quick-sales/${id}`],
   });
 
   const placeBidMutation = useMutation({
@@ -104,7 +104,7 @@ export default function QuickSaleDetail() {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/quick-sales', id] });
+      queryClient.invalidateQueries({ queryKey: [`/api/quick-sales/${id}`] });
       toast({
         title: "Bid Placed Successfully!",
         description: "Your bid has been recorded. You'll be contacted if you win.",
@@ -212,11 +212,11 @@ export default function QuickSaleDetail() {
             <Card className="p-6">
               <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
                 <Package className="h-6 w-6" />
-                Items in This Auction ({sale.products.length})
+                Items in This Auction ({sale.products?.length || 0})
               </h2>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {sale.products.map((product) => (
+                {sale.products?.map((product) => (
                   <Card key={product.id} className="p-4">
                     {product.images && product.images.length > 0 && (
                       <div className="mb-3">
@@ -251,11 +251,11 @@ export default function QuickSaleDetail() {
             <Card className="p-6">
               <h2 className="text-2xl font-bold mb-4">Bidding History</h2>
               
-              {sale.bids.length === 0 ? (
+              {!sale.bids || sale.bids.length === 0 ? (
                 <p className="text-gray-600 text-center py-8">No bids yet. Be the first to bid!</p>
               ) : (
                 <div className="space-y-3">
-                  {sale.bids.map((bid, index) => (
+                  {sale.bids?.map((bid, index) => (
                     <div 
                       key={bid.id}
                       className={`p-4 rounded-lg ${index === 0 ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}`}
