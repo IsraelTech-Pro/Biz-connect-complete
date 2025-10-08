@@ -84,6 +84,11 @@ import MobileMoney from './pages/policies/mobile-money';
 // Contact page
 import ContactVendor from './pages/contact-vendor';
 
+// Quick Sale pages
+import QuickSaleListing from './pages/quick-sale/listing';
+import QuickSaleDetail from './pages/quick-sale/detail';
+import CreateQuickSale from './pages/quick-sale/create';
+
 function Router() {
   return (
     <Switch>
@@ -101,6 +106,11 @@ function Router() {
       <Route path="/products-listing" component={ProductsListing} />
       <Route path="/products/:id" component={ProductDetail} />
       <Route path="/vendors" component={Vendors} />
+      
+      {/* Quick Sale / Auction routes - no authentication required */}
+      <Route path="/quick-sale" component={QuickSaleListing} />
+      <Route path="/quick-sale/create" component={CreateQuickSale} />
+      <Route path="/quick-sale/:id" component={QuickSaleDetail} />
       
       {/* Protected commerce routes - require authentication */}
       <Route path="/cart">

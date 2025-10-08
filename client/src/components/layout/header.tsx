@@ -407,6 +407,13 @@ export const Header = () => {
                 >
                   Community
                 </Link>
+                <Link
+                  to="/quick-sale"
+                  className="text-ktu-deep-blue hover:text-ktu-orange transition-colors font-medium"
+                  data-testid="link-quick-sale"
+                >
+                  Quick Sale
+                </Link>
               </div>
               {(!user || (user.role !== "vendor" && user.role !== "admin")) && (
                 <Link
@@ -531,6 +538,15 @@ export const Header = () => {
               >
                 <span className="text-lg">💬</span>
                 <span className="text-sm font-medium">Community</span>
+              </Link>
+              <Link
+                to="/quick-sale"
+                className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-50 text-ktu-deep-blue hover:text-ktu-orange"
+                onClick={() => setIsMenuOpen(false)}
+                data-testid="link-quick-sale-mobile"
+              >
+                <span className="text-lg">⚡</span>
+                <span className="text-sm font-medium">Quick Sale</span>
               </Link>
             </div>
           </motion.div>
