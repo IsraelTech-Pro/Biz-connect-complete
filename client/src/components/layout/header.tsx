@@ -306,28 +306,12 @@ export const Header = () => {
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-1 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
                   {user ? (
                     <>
-                      {user.role === "vendor" && (
+                      {(user.role === "vendor" || user.role === "admin") && (
                         <Link
-                          to="/vendor/dashboard"
+                          to={user.role === "vendor" ? "/vendor/dashboard" : "/admin/dashboard"}
                           className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
-                          Dashboard
-                        </Link>
-                      )}
-                      {user.role === "admin" && (
-                        <Link
-                          to="/admin/dashboard"
-                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                        >
-                          Admin Panel
-                        </Link>
-                      )}
-                      {user.role !== "vendor" && user.role !== "admin" && (
-                        <Link
-                          to="/vendor/register"
-                          className="block px-4 py-2 text-sm text-orange-600 hover:bg-orange-50 font-medium"
-                        >
-                          Become a Seller
+                          {user.role === "vendor" ? "Dashboard" : "Admin Panel"}
                         </Link>
                       )}
                       <button
@@ -349,7 +333,7 @@ export const Header = () => {
                         to="/auth/register"
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                       >
-                        Create Account
+                        Become a Seller
                       </Link>
                     </>
                   )}
