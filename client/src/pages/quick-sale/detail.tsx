@@ -100,7 +100,7 @@ export default function QuickSaleDetail() {
     mutationFn: async (bidData: { bidder_name: string; bid_amount: string; contact_number: string }) => {
       return await apiRequest(`/api/quick-sales/${id}/bids`, {
         method: 'POST',
-        body: JSON.stringify(bidData),
+        body: bidData,
       });
     },
     onSuccess: () => {
@@ -210,38 +210,35 @@ export default function QuickSaleDetail() {
 
             {/* Products */}
             <Card className="p-6">
-              <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                <Package className="h-6 w-6" />
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                <Package className="h-6 w-6 text-orange-600" />
                 Items in This Auction ({sale.products?.length || 0})
               </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sale.products?.map((product) => (
-                  <Card key={product.id} className="p-4">
+                  <Card key={product.id} className="overflow-hidden hover:shadow-lg transition-shadow duration-200">
                     {product.images && product.images.length > 0 && (
-                      <div className="mb-3">
+                      <div className="relative">
                         <img
                           src={product.images[0]}
                           alt={product.title}
-                          className="w-full h-40 object-cover rounded"
+                          className="w-full h-32 object-cover"
                         />
+                        <div className="absolute top-2 right-2">
+                          <Badge className="bg-orange-600 text-white">{product.condition}</Badge>
+                        </div>
                         {product.images.length > 1 && (
-                          <div className="flex gap-2 mt-2 overflow-x-auto">
-                            {product.images.slice(1).map((img, idx) => (
-                              <img
-                                key={idx}
-                                src={img}
-                                alt={`${product.title} ${idx + 2}`}
-                                className="w-16 h-16 object-cover rounded cursor-pointer hover:opacity-75"
-                              />
-                            ))}
+                          <div className="absolute bottom-2 right-2 bg-black/60 text-white px-2 py-1 rounded text-xs">
+                            +{product.images.length - 1} more
                           </div>
                         )}
                       </div>
                     )}
-                    <h3 className="font-semibold mb-2">{product.title}</h3>
-                    <p className="text-sm text-gray-600 mb-2">{product.description}</p>
-                    <Badge variant="outline">{product.condition}</Badge>
+                    <div className="p-3">
+                      <h3 className="font-semibold text-sm mb-1 line-clamp-1">{product.title}</h3>
+                      <p className="text-xs text-gray-600 line-clamp-2">{product.description}</p>
+                    </div>
                   </Card>
                 ))}
               </div>
