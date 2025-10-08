@@ -102,29 +102,32 @@ const ProductCard = ({ product }: { product: any }) => {
 
 // Quick Sale Card Component
 const QuickSaleCard = ({ sale }: { sale: any }) => {
-  const [timeLeft, setTimeLeft] = useState<string>("");
+  const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    const calculateTimeLeft = () => {
       const now = new Date().getTime();
       const end = new Date(sale.ends_at).getTime();
       const distance = end - now;
 
       if (distance < 0) {
-        setTimeLeft("Ended");
-        clearInterval(timer);
+        setTimeLeft(null);
         return;
       }
 
       const days = Math.floor(distance / (1000 * 60 * 60 * 24));
       const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
       
-      if (days > 0) {
-        setTimeLeft(`${days}d ${hours}h`);
-      } else {
-        setTimeLeft(`${hours}h left`);
-      }
-    }, 1000);
+      setTimeLeft({ days, hours, minutes, seconds });
+    };
+
+    // Calculate immediately on mount
+    calculateTimeLeft();
+    
+    // Then update every second
+    const timer = setInterval(calculateTimeLeft, 1000);
 
     return () => clearInterval(timer);
   }, [sale.ends_at]);
@@ -134,9 +137,14 @@ const QuickSaleCard = ({ sale }: { sale: any }) => {
       <div className="ktu-card animate-card-lift h-full group bg-gradient-to-br from-orange-50 to-white">
         <div className="relative">
           <div className="absolute top-2 right-2 z-10">
-            <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full font-medium flex items-center gap-1">
+            <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1">
               <Timer className="h-3 w-3" />
-              {timeLeft}
+              {timeLeft ? (
+                <>
+                  {timeLeft.days > 0 && `${timeLeft.days}d `}
+                  {String(timeLeft.hours).padStart(2, '0')}:{String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}
+                </>
+              ) : 'Ended'}
             </span>
           </div>
           <div className="absolute top-2 left-2 z-10">
@@ -329,6 +337,48 @@ export default function KTUHome() {
   return (
     <div className="min-h-screen bg-ktu-grey">
 
+      {/* Quick Sale / Auction Section - Top Priority */}
+      {quickSalesData.length > 0 && (
+        <section className="container mx-auto px-4 py-8 bg-gradient-to-r from-orange-50 to-white rounded-xl">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-ktu-deep-blue flex items-center gap-2">
+                <Gavel className="h-6 w-6 text-ktu-orange" />
+                Live Auctions & Quick Sales
+              </h2>
+              <p className="text-sm text-ktu-dark-grey mt-1">
+                Limited-time deals - Place your bids now!
+              </p>
+            </div>
+            <Link href="/quick-sale">
+              <Button className="bg-ktu-orange hover:bg-ktu-orange/90 text-white">
+                View All Auctions <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {quickSalesLoading ? (
+              // Loading skeleton
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="animate-pulse">
+                  <div className="bg-gray-200 rounded-lg h-52 mb-2"></div>
+                  <div className="bg-gray-200 rounded h-4 mb-1"></div>
+                  <div className="bg-gray-200 rounded h-3"></div>
+                </div>
+              ))
+            ) : (
+              quickSalesData
+                .filter(sale => sale.status === 'active')
+                .slice(0, 4)
+                .map((sale) => (
+                  <QuickSaleCard key={sale.id} sale={sale} />
+                ))
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Quick Actions Grid */}
       <section className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -426,48 +476,6 @@ export default function KTUHome() {
           )}
         </div>
       </section>
-
-      {/* Quick Sale / Auction Section */}
-      {quickSalesData.length > 0 && (
-        <section className="container mx-auto px-4 py-8 bg-gradient-to-r from-orange-50 to-white rounded-xl">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-2xl font-bold text-ktu-deep-blue flex items-center gap-2">
-                <Gavel className="h-6 w-6 text-ktu-orange" />
-                Live Auctions & Quick Sales
-              </h2>
-              <p className="text-sm text-ktu-dark-grey mt-1">
-                Limited-time deals - Place your bids now!
-              </p>
-            </div>
-            <Link href="/quick-sale">
-              <Button className="bg-ktu-orange hover:bg-ktu-orange/90 text-white">
-                View All Auctions <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </Link>
-          </div>
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {quickSalesLoading ? (
-              // Loading skeleton
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="animate-pulse">
-                  <div className="bg-gray-200 rounded-lg h-52 mb-2"></div>
-                  <div className="bg-gray-200 rounded h-4 mb-1"></div>
-                  <div className="bg-gray-200 rounded h-3"></div>
-                </div>
-              ))
-            ) : (
-              quickSalesData
-                .filter(sale => sale.status === 'active')
-                .slice(0, 4)
-                .map((sale) => (
-                  <QuickSaleCard key={sale.id} sale={sale} />
-                ))
-            )}
-          </div>
-        </section>
-      )}
 
       {/* Categories Section */}
       <section className="container mx-auto px-4 py-8">
