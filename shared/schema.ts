@@ -169,6 +169,42 @@ export const transactions = pgTable("transactions", {
   updated_at: timestamp("updated_at").defaultNow(),
 });
 
+// Quick Sale / Auction tables
+export const quick_sales = pgTable("quick_sales", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  seller_name: text("seller_name").notNull(),
+  seller_contact: text("seller_contact").notNull(),
+  seller_email: text("seller_email"),
+  starts_at: timestamp("starts_at").notNull(),
+  ends_at: timestamp("ends_at").notNull(),
+  status: text("status").notNull().default("active"), // active, ended, cancelled
+  reserve_price: decimal("reserve_price", { precision: 10, scale: 2 }),
+  winning_bid_id: uuid("winning_bid_id"),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+
+export const quick_sale_products = pgTable("quick_sale_products", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quick_sale_id: uuid("quick_sale_id").notNull().references(() => quick_sales.id, { onDelete: 'cascade' }),
+  title: text("title").notNull(),
+  description: text("description"),
+  image_url: text("image_url"),
+  estimated_value: decimal("estimated_value", { precision: 10, scale: 2 }),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+export const quick_sale_bids = pgTable("quick_sale_bids", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quick_sale_id: uuid("quick_sale_id").notNull().references(() => quick_sales.id, { onDelete: 'cascade' }),
+  bidder_name: text("bidder_name").notNull(),
+  bid_amount: decimal("bid_amount", { precision: 10, scale: 2 }).notNull(),
+  contact_number: text("contact_number").notNull(),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -215,6 +251,34 @@ export const insertTransactionSchema = createInsertSchema(transactions).omit({
   id: true,
   created_at: true,
   updated_at: true,
+});
+
+export const insertQuickSaleSchema = createInsertSchema(quick_sales).omit({
+  id: true,
+  created_at: true,
+  updated_at: true,
+  winning_bid_id: true,
+}).extend({
+  title: z.string().min(3, "Title must be at least 3 characters"),
+  description: z.string().min(10, "Description must be at least 10 characters"),
+  seller_name: z.string().min(2, "Seller name is required"),
+  seller_contact: z.string().min(10, "Valid contact number is required"),
+  ends_at: z.date().or(z.string()),
+  starts_at: z.date().or(z.string()),
+});
+
+export const insertQuickSaleProductSchema = createInsertSchema(quick_sale_products).omit({
+  id: true,
+  created_at: true,
+});
+
+export const insertQuickSaleBidSchema = createInsertSchema(quick_sale_bids).omit({
+  id: true,
+  created_at: true,
+}).extend({
+  bidder_name: z.string().min(2, "Bidder name is required"),
+  bid_amount: z.string().min(1, "Bid amount is required"),
+  contact_number: z.string().min(10, "Valid contact number is required"),
 });
 
 // Admin management tables
@@ -326,6 +390,12 @@ export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
+export type QuickSale = typeof quick_sales.$inferSelect;
+export type InsertQuickSale = z.infer<typeof insertQuickSaleSchema>;
+export type QuickSaleProduct = typeof quick_sale_products.$inferSelect;
+export type InsertQuickSaleProduct = z.infer<typeof insertQuickSaleProductSchema>;
+export type QuickSaleBid = typeof quick_sale_bids.$inferSelect;
+export type InsertQuickSaleBid = z.infer<typeof insertQuickSaleBidSchema>;
 export type Mentor = typeof mentors.$inferSelect;
 export type InsertMentor = z.infer<typeof insertMentorSchema>;
 export type Program = typeof programs.$inferSelect;
