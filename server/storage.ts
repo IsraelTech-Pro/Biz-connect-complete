@@ -1,4 +1,4 @@
-import { users, products, orders, payouts, platform_settings, support_requests, vendor_support_requests, payments, transactions, mentors, programs, resources, adminUsers, discussions, comments, likes, businessRatings, productRatings, type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type Payout, type InsertPayout, type PlatformSettings, type SupportRequest, type InsertSupportRequest, type VendorSupportRequest, type InsertVendorSupportRequest, type Payment, type InsertPayment, type Mentor, type InsertMentor, type Program, type InsertProgram, type Resource, type InsertResource, type AdminUser, type InsertAdminUser, type Discussion, type InsertDiscussion, type Comment, type InsertComment, type Like, type InsertLike, type BusinessRating, type InsertBusinessRating, type ProductRating, type InsertProductRating } from "@shared/schema";
+import { users, products, orders, payouts, platform_settings, support_requests, vendor_support_requests, payments, transactions, mentors, programs, resources, adminUsers, discussions, comments, likes, businessRatings, productRatings, quick_sales, quick_sale_products, quick_sale_bids, type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type Payout, type InsertPayout, type PlatformSettings, type SupportRequest, type InsertSupportRequest, type VendorSupportRequest, type InsertVendorSupportRequest, type Payment, type InsertPayment, type Mentor, type InsertMentor, type Program, type InsertProgram, type Resource, type InsertResource, type AdminUser, type InsertAdminUser, type Discussion, type InsertDiscussion, type Comment, type InsertComment, type Like, type InsertLike, type BusinessRating, type InsertBusinessRating, type ProductRating, type InsertProductRating, type QuickSale, type InsertQuickSale, type QuickSaleProduct, type InsertQuickSaleProduct, type QuickSaleBid, type InsertQuickSaleBid } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, and, desc, sql, like, or } from "drizzle-orm";
 import pg from "pg";
@@ -191,6 +191,21 @@ export interface IStorage {
     averageRating: number;
     totalRatings: number;
   }>;
+
+  // Quick Sales / Auctions
+  getQuickSales(status?: 'active' | 'ended' | 'cancelled'): Promise<any[]>;
+  getQuickSale(id: string): Promise<any | undefined>;
+  createQuickSale(quickSale: any, products: any[]): Promise<any>;
+  updateQuickSale(id: string, quickSale: any): Promise<any>;
+  finalizeQuickSale(id: string): Promise<any>;
+  
+  // Quick Sale Products
+  getQuickSaleProducts(quickSaleId: string): Promise<any[]>;
+  
+  // Quick Sale Bids
+  getQuickSaleBids(quickSaleId: string): Promise<any[]>;
+  createQuickSaleBid(bid: any): Promise<any>;
+  getHighestBid(quickSaleId: string): Promise<any | undefined>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -1177,6 +1192,109 @@ export class PostgresStorage implements IStorage {
       .limit(8);
     
     return result;
+  }
+
+  // Quick Sales / Auctions
+  async getQuickSales(status?: 'active' | 'ended' | 'cancelled'): Promise<QuickSale[]> {
+    if (!db) throw new Error('Database not available');
+    
+    const conditions = [];
+    if (status) {
+      conditions.push(eq(quick_sales.status, status));
+    }
+    
+    const result = await db.select()
+      .from(quick_sales)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(quick_sales.created_at));
+    
+    return result;
+  }
+
+  async getQuickSale(id: string): Promise<QuickSale | undefined> {
+    if (!db) throw new Error('Database not available');
+    const result = await db.select().from(quick_sales).where(eq(quick_sales.id, id));
+    return result[0];
+  }
+
+  async createQuickSale(quickSale: InsertQuickSale, products: InsertQuickSaleProduct[]): Promise<QuickSale> {
+    if (!db) throw new Error('Database not available');
+    
+    const saleResult = await db.insert(quick_sales).values([quickSale]).returning();
+    const sale = saleResult[0];
+    
+    if (products && products.length > 0) {
+      const productsWithSaleId = products.map(p => ({
+        ...p,
+        quick_sale_id: sale.id
+      }));
+      await db.insert(quick_sale_products).values(productsWithSaleId);
+    }
+    
+    return sale;
+  }
+
+  async updateQuickSale(id: string, quickSale: Partial<InsertQuickSale>): Promise<QuickSale> {
+    if (!db) throw new Error('Database not available');
+    const updateData: any = { ...quickSale };
+    if (updateData.starts_at && typeof updateData.starts_at === 'string') {
+      updateData.starts_at = new Date(updateData.starts_at);
+    }
+    if (updateData.ends_at && typeof updateData.ends_at === 'string') {
+      updateData.ends_at = new Date(updateData.ends_at);
+    }
+    const result = await db.update(quick_sales).set(updateData).where(eq(quick_sales.id, id)).returning();
+    return result[0];
+  }
+
+  async finalizeQuickSale(id: string): Promise<QuickSale> {
+    if (!db) throw new Error('Database not available');
+    
+    const highestBid = await this.getHighestBid(id);
+    
+    const result = await db.update(quick_sales)
+      .set({
+        status: 'ended',
+        winning_bid_id: highestBid?.id || null,
+        updated_at: new Date()
+      })
+      .where(eq(quick_sales.id, id))
+      .returning();
+    
+    return result[0];
+  }
+
+  async getQuickSaleProducts(quickSaleId: string): Promise<QuickSaleProduct[]> {
+    if (!db) throw new Error('Database not available');
+    const result = await db.select()
+      .from(quick_sale_products)
+      .where(eq(quick_sale_products.quick_sale_id, quickSaleId));
+    return result;
+  }
+
+  async getQuickSaleBids(quickSaleId: string): Promise<QuickSaleBid[]> {
+    if (!db) throw new Error('Database not available');
+    const result = await db.select()
+      .from(quick_sale_bids)
+      .where(eq(quick_sale_bids.quick_sale_id, quickSaleId))
+      .orderBy(desc(quick_sale_bids.bid_amount));
+    return result;
+  }
+
+  async createQuickSaleBid(bid: InsertQuickSaleBid): Promise<QuickSaleBid> {
+    if (!db) throw new Error('Database not available');
+    const result = await db.insert(quick_sale_bids).values(bid).returning();
+    return result[0];
+  }
+
+  async getHighestBid(quickSaleId: string): Promise<QuickSaleBid | undefined> {
+    if (!db) throw new Error('Database not available');
+    const result = await db.select()
+      .from(quick_sale_bids)
+      .where(eq(quick_sale_bids.quick_sale_id, quickSaleId))
+      .orderBy(desc(quick_sale_bids.bid_amount))
+      .limit(1);
+    return result[0];
   }
 }
 
