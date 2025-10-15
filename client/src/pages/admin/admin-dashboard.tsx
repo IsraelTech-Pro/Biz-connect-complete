@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Users,
@@ -73,7 +73,16 @@ export default function AdminDashboard() {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [modalType, setModalType] = useState<'business' | 'user'>('business');
-  
+  const [createAdminOpen, setCreateAdminOpen] = useState(false);
+  const [resetAdminOpen, setResetAdminOpen] = useState<{ open: boolean; id?: string }>(() => ({ open: false }));
+  const [newAdminUsername, setNewAdminUsername] = useState('');
+  const [newAdminFullName, setNewAdminFullName] = useState('');
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [confirmAdminPassword, setConfirmAdminPassword] = useState('');
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const queryClient = useQueryClient();
+
   // Get admin token once at component level
   const adminToken = localStorage.getItem('admin_token');
 
@@ -115,11 +124,19 @@ export default function AdminDashboard() {
 
       if (!response.ok) throw new Error('Failed to update business status');
 
+      // Optimistically update cache so buttons hide immediately
+      queryClient.setQueryData<Business[] | undefined>(['/api/admin/businesses'], (old) => {
+        if (!old) return old;
+        return old.map(b => b.id === businessId ? { ...b, is_approved: approved } : b);
+      });
+
       toast({
         title: "Business Updated",
         description: `Business ${approved ? 'approved' : 'rejected'} successfully.`,
       });
       
+      // Force re-fetch to ensure we pick updated DB values
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/businesses'] });
       refetchBusinesses();
     } catch (error) {
       toast({
@@ -144,12 +161,25 @@ export default function AdminDashboard() {
 
       if (!response.ok) throw new Error('Failed to update user');
 
+      // Optimistically update users cache
+      queryClient.setQueryData<User[] | undefined>(['/api/admin/users'], (old) => {
+        if (!old) return old;
+        return old.map(u => u.id === userId ? { ...u, ...updates } as User : u);
+      });
+
       toast({
         title: "User Updated",
         description: "User information updated successfully.",
       });
       
+      // Ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
       refetchUsers();
+      // If vendor approval status changes, businesses list may need refresh
+      if (typeof updates.is_approved !== 'undefined') {
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/businesses'] });
+        if (typeof refetchBusinesses === 'function') refetchBusinesses();
+      }
     } catch (error) {
       toast({
         title: "Error",
@@ -283,6 +313,128 @@ export default function AdminDashboard() {
     enabled: !!adminToken
   });
 
+  // Admin users list and actions
+  interface AdminUserRow { id: string; username: string; full_name: string; email: string; is_active: boolean; created_at: string; }
+  const { data: adminUsers = [], isLoading: adminUsersLoading, refetch: refetchAdminUsers } = useQuery<AdminUserRow[]>({
+    queryKey: ['/api/admin/admin-users'],
+    queryFn: async () => {
+      const response = await fetch('/api/admin/admin-users', {
+        headers: { 'Authorization': `Bearer ${adminToken}` }
+      });
+      if (!response.ok) throw new Error('Failed to fetch admin users');
+      return response.json();
+    },
+    enabled: !!adminToken
+  });
+
+  const createAdmin = async () => {
+    if (!newAdminUsername.trim() || !newAdminPassword || !newAdminFullName.trim() || !newAdminEmail.trim()) {
+      toast({ title: 'Missing fields', description: 'Username, full name, email and password are required.', variant: 'destructive' });
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newAdminEmail.trim())) {
+      toast({ title: 'Invalid email', description: 'Enter a valid email address.', variant: 'destructive' });
+      return;
+    }
+    if (newAdminPassword !== confirmAdminPassword) {
+      toast({ title: 'Password mismatch', description: 'Passwords do not match.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const response = await fetch('/api/admin/admin-users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+        body: JSON.stringify({ username: newAdminUsername.trim(), password: newAdminPassword, full_name: newAdminFullName.trim(), email: newAdminEmail.trim() })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Failed to create admin');
+      queryClient.setQueryData<AdminUserRow[] | undefined>(['/api/admin/admin-users'], (old) => {
+        if (!old) return [data];
+        return [data, ...old];
+      });
+      toast({ title: 'Admin Created', description: `Admin ${newAdminUsername} created.` });
+      setCreateAdminOpen(false);
+      setNewAdminUsername('');
+      setNewAdminPassword('');
+      setNewAdminFullName('');
+      setNewAdminEmail('');
+      setConfirmAdminPassword('');
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/admin-users'] });
+      refetchAdminUsers();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to create admin', variant: 'destructive' });
+    }
+  };
+
+  const toggleAdminActive = async (id: string, isActive: boolean) => {
+    try {
+      const response = await fetch(`/api/admin/admin-users/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+        body: JSON.stringify({ is_active: !isActive })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Failed to update admin');
+      queryClient.setQueryData<AdminUserRow[] | undefined>(['/api/admin/admin-users'], (old) => {
+        if (!old) return old;
+        return old.map(a => a.id === id ? { ...a, is_active: !isActive } : a);
+      });
+      toast({ title: 'Updated', description: 'Admin status updated.' });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/admin-users'] });
+      refetchAdminUsers();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to update admin', variant: 'destructive' });
+    }
+  };
+
+  const resetAdminPassword = async () => {
+    if (!resetAdminOpen.id) return;
+    if (!resetPasswordValue) {
+      toast({ title: 'Missing password', description: 'Enter a new password.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const response = await fetch(`/api/admin/admin-users/${resetAdminOpen.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+        body: JSON.stringify({ password: resetPasswordValue })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Failed to reset password');
+      toast({ title: 'Password Reset', description: 'Admin password updated.' });
+      setResetAdminOpen({ open: false });
+      setResetPasswordValue('');
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to reset password', variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteAdmin = async (id: string, username: string) => {
+    if (adminUser?.username === username) {
+      toast({ title: 'Not allowed', description: 'You cannot delete the admin you are logged in as.', variant: 'destructive' });
+      return;
+    }
+    if (!confirm('Are you sure you want to deactivate this admin account?')) return;
+    try {
+      const resp = await fetch(`/api/admin/admin-users/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${adminToken}` }
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.message || 'Failed to delete admin');
+      queryClient.setQueryData<AdminUserRow[] | undefined>(['/api/admin/admin-users'], (old) => {
+        if (!old) return old;
+        return old.map(a => a.id === id ? { ...a, is_active: false } : a);
+      });
+      toast({ title: 'Admin Deactivated', description: 'Admin account has been deactivated.' });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/admin-users'] });
+      refetchAdminUsers();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to delete admin', variant: 'destructive' });
+    }
+  };
+
   // If no admin session, render loading or redirect (useEffect will handle redirect)
   if (!adminUser) {
     return (
@@ -373,6 +525,13 @@ export default function AdminDashboard() {
       icon: BookOpen,
       color: "bg-ktu-orange",
       action: "/admin/mentorship"
+    },
+    {
+      title: "Manage Quick Sales",
+      description: "Create, finalize and remove auctions",
+      icon: Target,
+      color: "bg-red-500",
+      action: "/admin/quick-sales"
     },
     {
       title: "Community Discussions",
@@ -519,9 +678,10 @@ export default function AdminDashboard() {
           transition={{ duration: 0.5, delay: 0.4 }}
         >
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="businesses">Manage Businesses</TabsTrigger>
               <TabsTrigger value="users">Manage Users</TabsTrigger>
+              <TabsTrigger value="admins">Manage Admins</TabsTrigger>
             </TabsList>
 
             
@@ -642,6 +802,120 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            <TabsContent value="admins" className="mt-6">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-lg text-ktu-deep-blue">Admin Management</CardTitle>
+                  <Button onClick={() => setCreateAdminOpen(true)} className="bg-ktu-orange hover:bg-orange-600 text-white" size="sm">
+                    <Plus className="w-4 h-4 mr-1" />
+                    Create Admin
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {adminUsersLoading ? (
+                    <p className="text-sm text-gray-500">Loading admins...</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {adminUsers.map((a) => (
+                        <div key={a.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-gray-900">{a.full_name} <span className="text-xs text-gray-500">(@{a.username})</span></h3>
+                            <p className="text-sm text-gray-600">{a.email}</p>
+                            <p className="text-xs text-gray-500">Joined {new Date(a.created_at).toLocaleDateString()}</p>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <Badge className={a.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                              {a.is_active ? 'Active' : 'Inactive'}
+                            </Badge>
+                            <Button
+                              size="sm"
+                              variant={a.is_active ? 'destructive' : 'default'}
+                              onClick={() => toggleAdminActive(a.id, a.is_active)}
+                            >
+                              {a.is_active ? 'Deactivate' : 'Activate'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setResetAdminOpen({ open: true, id: a.id })}
+                            >
+                              Reset Password
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={adminUser?.username === a.username}
+                              title={adminUser?.username === a.username ? 'Cannot delete the currently logged-in admin' : 'Deactivate admin account'}
+                              onClick={() => handleDeleteAdmin(a.id, a.username)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                      {adminUsers.length === 0 && (
+                        <p className="text-sm text-gray-500">No admin accounts yet.</p>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Create Admin Modal */}
+              <Dialog open={createAdminOpen} onOpenChange={setCreateAdminOpen}>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle className="text-ktu-deep-blue">Create Admin</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-sm text-gray-600">Username</label>
+                      <input className="mt-1 w-full border rounded px-3 py-2" value={newAdminUsername} onChange={(e) => setNewAdminUsername(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">Full Name</label>
+                      <input className="mt-1 w-full border rounded px-3 py-2" value={newAdminFullName} onChange={(e) => setNewAdminFullName(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">Email</label>
+                      <input type="email" className="mt-1 w-full border rounded px-3 py-2" value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">Password</label>
+                      <input type="password" className="mt-1 w-full border rounded px-3 py-2" value={newAdminPassword} onChange={(e) => setNewAdminPassword(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600">Confirm Password</label>
+                      <input type="password" className="mt-1 w-full border rounded px-3 py-2" value={confirmAdminPassword} onChange={(e) => setConfirmAdminPassword(e.target.value)} />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button variant="outline" onClick={() => setCreateAdminOpen(false)}>Cancel</Button>
+                      <Button className="bg-ktu-orange hover:bg-orange-600 text-white" onClick={createAdmin}>Create</Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* Reset Admin Password Modal */}
+              <Dialog open={resetAdminOpen.open} onOpenChange={(o) => setResetAdminOpen({ open: o })}>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle className="text-ktu-deep-blue">Reset Admin Password</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-sm text-gray-600">New Password</label>
+                      <input type="password" className="mt-1 w-full border rounded px-3 py-2" value={resetPasswordValue} onChange={(e) => setResetPasswordValue(e.target.value)} />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button variant="outline" onClick={() => setResetAdminOpen({ open: false })}>Cancel</Button>
+                      <Button className="bg-ktu-orange hover:bg-orange-600 text-white" onClick={resetAdminPassword}>Update</Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </TabsContent>
           </Tabs>
         </motion.div>
       </div>
@@ -651,6 +925,7 @@ export default function AdminDashboard() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="text-ktu-deep-blue">
+              {modalType === 'business' ? 'Business Details' : modalType === 'user' ? 'User Details' : 'Admin Details'}
               {modalType === 'business' ? 'Business Details' : 'User Details'}
             </DialogTitle>
           </DialogHeader>

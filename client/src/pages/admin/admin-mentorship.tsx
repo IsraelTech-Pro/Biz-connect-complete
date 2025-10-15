@@ -16,7 +16,8 @@ import {
   Building,
   Briefcase,
   Star,
-  ArrowLeft
+  ArrowLeft,
+  Loader2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -660,6 +661,65 @@ export default function AdminMentorship() {
   const [showProgramForm, setShowProgramForm] = useState(false);
   const [editingMentor, setEditingMentor] = useState(null);
   const [editingProgram, setEditingProgram] = useState(null);
+  const [showRegistrants, setShowRegistrants] = useState(false);
+  const [registrantsProgram, setRegistrantsProgram] = useState<any>(null);
+  const [registrants, setRegistrants] = useState<any[]>([]);
+  const [selectedEmails, setSelectedEmails] = useState<Record<string, boolean>>({});
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const openRegistrants = async (program: any) => {
+    setRegistrantsProgram(program);
+    setShowRegistrants(true);
+    try {
+      const adminToken = localStorage.getItem('admin_token');
+      const resp = await fetch(`/api/admin/programs/${program.id}/applications`, {
+        headers: { 'Authorization': `Bearer ${adminToken}` }
+      });
+      if (!resp.ok) throw new Error('Failed to load registrants');
+      const rows = await resp.json();
+      setRegistrants(Array.isArray(rows) ? rows : []);
+      const sel: Record<string, boolean> = {};
+      (rows || []).forEach((r: any) => { if (r.email) sel[r.email] = true; });
+      setSelectedEmails(sel);
+    } catch (_e) {
+      setRegistrants([]);
+    }
+  };
+
+  const toggleAllRegistrants = (checked: boolean) => {
+    const next: Record<string, boolean> = {};
+    registrants.forEach(r => { if (r.email) next[r.email] = checked; });
+    setSelectedEmails(next);
+  };
+
+  const sendEmailToRegistrants = async () => {
+    if (!registrantsProgram) return;
+    const emails = Object.keys(selectedEmails).filter(e => selectedEmails[e]);
+    if (emails.length === 0) {
+      toast({ title: 'Select recipients', description: 'Please select at least one registrant.' , variant: 'destructive'});
+      return;
+    }
+    try {
+      setSending(true);
+      const adminToken = localStorage.getItem('admin_token');
+      const resp = await fetch(`/api/admin/programs/${registrantsProgram.id}/applications/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+        body: JSON.stringify({ subject: emailSubject || 'KTU BizConnect Program Update', message: emailBody, emails })
+      });
+      if (!resp.ok) throw new Error('Failed to send emails');
+      toast({ title: 'Emails Sent', description: 'Messages have been dispatched to selected registrants.' });
+      setShowRegistrants(false);
+      setEmailSubject('');
+      setEmailBody('');
+    } catch (_e) {
+      toast({ title: 'Error', description: 'Failed to send emails to registrants.', variant: 'destructive' });
+    } finally {
+      setSending(false);
+    }
+  };
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -983,6 +1043,14 @@ export default function AdminMentorship() {
                           <Button
                             size="sm"
                             variant="outline"
+                            onClick={() => openRegistrants(program)}
+                            className="flex-1"
+                          >
+                            Registrants
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             onClick={() => handleEditProgram(program)}
                             className="flex-1"
                           >
@@ -1007,6 +1075,65 @@ export default function AdminMentorship() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={showRegistrants} onOpenChange={setShowRegistrants}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Program Registrants</DialogTitle>
+            <DialogDescription>
+              {registrantsProgram ? registrantsProgram.title : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-ktu-dark-grey">Total: {registrants.length}</div>
+              <div className="space-x-2">
+                <Button size="sm" variant="outline" onClick={() => toggleAllRegistrants(true)}>Select All</Button>
+                <Button size="sm" variant="outline" onClick={() => toggleAllRegistrants(false)}>Clear</Button>
+              </div>
+            </div>
+            <div className="border rounded-md divide-y">
+              {registrants.map((r: any) => (
+                <div key={r.id} className="p-3 flex items-center justify-between">
+                  <div>
+                    <div className="font-medium text-ktu-deep-blue">{r.full_name}</div>
+                    <div className="text-sm text-ktu-dark-grey">{r.email}</div>
+                    {r.phone ? <div className="text-xs text-gray-500">{r.phone}</div> : null}
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={!!selectedEmails[r.email]}
+                    onChange={(e) => setSelectedEmails(prev => ({ ...prev, [r.email]: e.target.checked }))}
+                  />
+                </div>
+              ))}
+              {registrants.length === 0 && (
+                <div className="p-6 text-center text-sm text-ktu-dark-grey">No registrants found for this program.</div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reg-email-subject">Email Subject</Label>
+              <Input id="reg-email-subject" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Subject" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reg-email-body">Email Message</Label>
+              <Textarea id="reg-email-body" rows={6} value={emailBody} onChange={(e) => setEmailBody(e.target.value)} placeholder="Write your message to selected registrants..." />
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={sendEmailToRegistrants} disabled={sending} className="bg-ktu-orange hover:bg-ktu-orange-light">
+                {sending ? (
+                  <span className="inline-flex items-center">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Sending...
+                  </span>
+                ) : (
+                  'Send Email'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

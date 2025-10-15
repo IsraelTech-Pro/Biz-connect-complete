@@ -7,6 +7,7 @@ import {
   TrendingUp, Target, Search, Filter, Plus, CheckCircle,
   ArrowRight, User, Building, Briefcase, Trophy
 } from 'lucide-react';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import MentorProfile from '@/components/MentorProfile';
 import ProgramDetails from '@/components/ProgramDetails';
+import ApplyOtpModal from '@/components/auth/ApplyOtpModal';
+
 import { format } from 'date-fns';
 
 // MentorCard Component
@@ -94,7 +97,7 @@ const MentorCard = ({ mentor, index, onViewProfile }: { mentor: any; index: numb
 };
 
 // ProgramCard Component
-const ProgramCard = ({ program, index, onViewDetails }: { program: any; index: number; onViewDetails: (program: any) => void }) => {
+const ProgramCard = ({ program, index, onViewDetails, onApply }: { program: any; index: number; onViewDetails: (program: any) => void; onApply: (program: any) => void }) => {
   const formatProgramType = (type: string) => {
     return type.charAt(0).toUpperCase() + type.slice(1);
   };
@@ -170,10 +173,10 @@ const ProgramCard = ({ program, index, onViewDetails }: { program: any; index: n
           <div className="space-y-2">
             <Button 
               className="w-full bg-ktu-orange hover:bg-ktu-orange-light"
-              onClick={() => onViewDetails(program)}
+              onClick={() => onApply(program)}
             >
-              <MessageCircle className="h-4 w-4 mr-2" />
-              Contact Support
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Apply
             </Button>
             <Button 
               variant="outline" 
@@ -195,6 +198,7 @@ export default function MentorshipHub() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMentor, setSelectedMentor] = useState<any>(null);
   const [selectedProgram, setSelectedProgram] = useState<any>(null);
+  const [applyOpen, setApplyOpen] = useState(false);
 
   // Fetch mentors from the real database
   const { data: mentorsData, isLoading: mentorsLoading } = useQuery({
@@ -237,6 +241,11 @@ export default function MentorshipHub() {
 
   const handleViewProgramDetails = (program: any) => {
     setSelectedProgram(program);
+  };
+
+  const handleApplyToProgram = (program: any) => {
+    setSelectedProgram(program);
+    setApplyOpen(true);
   };
 
   if (mentorsLoading || programsLoading) {
@@ -418,6 +427,7 @@ export default function MentorshipHub() {
                   program={program} 
                   index={index}
                   onViewDetails={handleViewProgramDetails}
+                  onApply={handleApplyToProgram}
                 />
               ))}
             </div>
@@ -452,6 +462,14 @@ export default function MentorshipHub() {
           onClose={() => setSelectedProgram(null)}
         />
       )}
+
+      {/* Apply via Email OTP Modal */}
+      <ApplyOtpModal
+        open={applyOpen}
+        onClose={() => setApplyOpen(false)}
+        programId={selectedProgram?.id}
+        programTitle={selectedProgram?.title}
+      />
     </div>
   );
 }

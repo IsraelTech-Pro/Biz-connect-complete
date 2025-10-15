@@ -82,7 +82,8 @@ export default function QuickSaleListing() {
             <Button 
               size="lg" 
               variant="secondary"
-              className="bg-white text-orange-600 hover:bg-orange-50"
+              className="hover:bg-orange-50"
+              style={{ backgroundColor: '#ffffff', color: '#ea580c' }}
               data-testid="button-create-auction"
             >
               <TrendingUp className="mr-2 h-5 w-5" />

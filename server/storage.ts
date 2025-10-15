@@ -2,6 +2,7 @@ import { users, products, orders, payouts, platform_settings, support_requests, 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, and, desc, sql, like, or } from "drizzle-orm";
 import pg from "pg";
+import 'dotenv/config';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -198,6 +199,7 @@ export interface IStorage {
   createQuickSale(quickSale: any, products: any[]): Promise<any>;
   updateQuickSale(id: string, quickSale: any): Promise<any>;
   finalizeQuickSale(id: string): Promise<any>;
+  deleteQuickSale(id: string): Promise<void>;
   
   // Quick Sale Products
   getQuickSaleProducts(quickSaleId: string): Promise<any[]>;
@@ -206,6 +208,10 @@ export interface IStorage {
   getQuickSaleBids(quickSaleId: string): Promise<any[]>;
   createQuickSaleBid(bid: any): Promise<any>;
   getHighestBid(quickSaleId: string): Promise<any | undefined>;
+
+  // Program Applications
+  createProgramApplication(data: { program_id: string; full_name: string; email: string; message?: string | null; phone?: string | null }): Promise<any>;
+  getProgramApplicationsByProgramId(programId: string): Promise<any[]>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -215,9 +221,19 @@ export class PostgresStorage implements IStorage {
     return result[0];
   }
 
+  async deleteQuickSale(id: string): Promise<void> {
+    if (!db) throw new Error('Database not available');
+    await db.delete(quick_sales).where(eq(quick_sales.id, id));
+  }
+
   async getUserByEmail(email: string): Promise<User | undefined> {
     if (!db) throw new Error('Database not available');
-    const result = await db.select().from(users).where(eq(users.email, email));
+    const normalized = email.trim().toLowerCase();
+    const result = await db
+      .select()
+      .from(users)
+      .where(sql`LOWER(${users.email}) = ${normalized}`)
+      .limit(1);
     return result[0];
   }
 
@@ -1040,7 +1056,12 @@ export class PostgresStorage implements IStorage {
   }
 
   // Community Stats
-  async getCommunityStats(): Promise<{ totalMembers: number; totalPosts: number; totalComments: number; totalLikes: number }> {
+  async getCommunityStats(): Promise<{
+    totalMembers: number;
+    totalPosts: number;
+    totalComments: number;
+    totalLikes: number;
+  }> {
     if (!db) throw new Error('Database not available');
     
     const [membersResult, postsResult, commentsResult, likesResult] = await Promise.all([
@@ -1220,7 +1241,14 @@ export class PostgresStorage implements IStorage {
   async createQuickSale(quickSale: InsertQuickSale, products: InsertQuickSaleProduct[]): Promise<QuickSale> {
     if (!db) throw new Error('Database not available');
     
-    const saleResult = await db.insert(quick_sales).values([quickSale]).returning();
+    const createData: any = { ...quickSale };
+    if (createData.starts_at && typeof createData.starts_at === 'string') {
+      createData.starts_at = new Date(createData.starts_at);
+    }
+    if (createData.ends_at && typeof createData.ends_at === 'string') {
+      createData.ends_at = new Date(createData.ends_at);
+    }
+    const saleResult = await db.insert(quick_sales).values(createData).returning();
     const sale = saleResult[0];
     
     if (products && products.length > 0) {
@@ -1295,6 +1323,30 @@ export class PostgresStorage implements IStorage {
       .orderBy(desc(quick_sale_bids.bid_amount))
       .limit(1);
     return result[0];
+  }
+
+  // Program Applications
+  async createProgramApplication(data: { program_id: string; full_name: string; email: string; message?: string | null; phone?: string | null }): Promise<any> {
+    if (!db) throw new Error('Database not available');
+    const result: any = await db.execute(sql`
+      INSERT INTO program_applications (program_id, full_name, email, message, phone)
+      VALUES (${data.program_id}, ${data.full_name}, ${data.email}, ${data.message ?? null}, ${data.phone ?? null})
+      ON CONFLICT (program_id, email)
+      DO UPDATE SET message = EXCLUDED.message, phone = EXCLUDED.phone, updated_at = NOW()
+      RETURNING id, program_id, full_name, email, message, phone, status, created_at, updated_at
+    `);
+    return result?.rows?.[0] ?? null;
+  }
+
+  async getProgramApplicationsByProgramId(programId: string): Promise<any[]> {
+    if (!db) throw new Error('Database not available');
+    const result: any = await db.execute(sql`
+      SELECT id, program_id, full_name, email, message, phone, status, created_at, updated_at
+      FROM program_applications
+      WHERE program_id = ${programId}
+      ORDER BY created_at DESC
+    `);
+    return result?.rows ?? [];
   }
 }
 

@@ -32,10 +32,23 @@ export default function AdminLogin() {
         body: JSON.stringify(credentials),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      let data: any = null;
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        if (!response.ok) {
+          // Surface a helpful message if server returned HTML (likely 404/catch-all)
+          const brief = text && text.trim().startsWith('<') ? 'Server returned HTML (route not found). Please ensure the API route exists and the server was restarted.' : text;
+          throw new Error(brief || 'Login failed');
+        }
+        // If ok but not JSON, treat as error
+        throw new Error('Unexpected response from server');
+      }
 
       if (!response.ok) {
-        throw new Error(data.error || 'Login failed');
+        throw new Error(data?.error || data?.message || 'Login failed');
       }
 
       // Store admin session

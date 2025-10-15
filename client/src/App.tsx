@@ -9,8 +9,6 @@ import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
 import { ProtectedRoute } from "@/components/protected-route";
 
-import { PaymentCallbackHandler } from "@/components/payment-callback-handler";
-import { PaymentSuccessNotice } from "@/components/payment-success-notice";
 import AdminApp from "./admin-app";
 // Core pages
 import NotFound from "@/pages/not-found";
@@ -29,8 +27,6 @@ import MentorshipHub from "./pages/mentorship-hub";
 
 // Commerce pages
 import Cart from "@/pages/cart";
-import Checkout from "@/pages/checkout";
-import PaymentResult from "@/pages/payment-result";
 import Orders from "@/pages/orders";
 import CartDashboard from './pages/cart-dashboard';
 
@@ -43,8 +39,8 @@ import VendorRegister from "@/pages/vendor/vendor-register";
 import VendorDashboard from "@/pages/vendor/vendor-dashboard";
 import VendorProducts from "@/pages/vendor/products";
 import VendorProductsGrid from "@/pages/vendor/products-grid";
-import VendorOrders from "@/pages/vendor/orders";
-import VendorAnalytics from "@/pages/vendor/analytics";
+//import VendorOrders from "@/pages/vendor/orders";
+//import VendorAnalytics from "@/pages/vendor/analytics";
 import VendorSettings from "@/pages/vendor/settings";
 
 // Admin pages
@@ -74,12 +70,9 @@ import CustomerSupport from './pages/buyers/customer-support';
 // Vendor pages
 import SellOnVendorHub from './pages/vendors/sell-on-vendorhub';
 import VendorGuidelines from './pages/vendors/vendor-guidelines';
-import PayoutInformation from './pages/vendors/payout-information';
 import VendorSupport from './pages/vendors/vendor-support';
 
 // Policy pages
-import PaymentOptions from './pages/policies/payment-options';
-import MobileMoney from './pages/policies/mobile-money';
 
 // Contact page
 import ContactVendor from './pages/contact-vendor';
@@ -125,17 +118,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      <Route path="/checkout">
-        <ProtectedRoute>
-          <Checkout />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/payment-result">
-        <ProtectedRoute>
-          <PaymentResult />
-        </ProtectedRoute>
-      </Route>
+      {/* Removed checkout and payment-result routes */}
       
       <Route path="/orders">
         <ProtectedRoute>
@@ -156,27 +139,15 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      <Route path="/vendor/products">
-        <ProtectedRoute>
-          <VendorProducts />
-        </ProtectedRoute>
-      </Route>
-      
       <Route path="/vendor/products/grid">
         <ProtectedRoute>
           <VendorProductsGrid />
         </ProtectedRoute>
       </Route>
-      
-      <Route path="/vendor/orders">
+
+      <Route path="/vendor/products">
         <ProtectedRoute>
-          <VendorOrders />
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/vendor/analytics">
-        <ProtectedRoute>
-          <VendorAnalytics />
+          <VendorProducts />
         </ProtectedRoute>
       </Route>
       
@@ -197,12 +168,11 @@ function Router() {
       {/* Public vendor information pages */}
       <Route path="/sell-on-vendorhub" component={SellOnVendorHub} />
       <Route path="/vendor-guidelines" component={VendorGuidelines} />
-      <Route path="/payout-information" component={PayoutInformation} />
+      {/* Removed payout information route */}
       <Route path="/vendor-support" component={VendorSupport} />
       
       {/* Public policy pages */}
-      <Route path="/payment-options" component={PaymentOptions} />
-      <Route path="/mobile-money" component={MobileMoney} />
+      {/* Removed payment policy routes */}
       
       {/* Public contact page */}
       <Route path="/contact-vendor" component={ContactVendor} />
@@ -225,8 +195,7 @@ function App() {
       <TooltipProvider>
         <AuthProvider>
           <CartProvider>
-            <PaymentCallbackHandler />
-            <PaymentSuccessNotice />
+            {/* Removed payment callback and success notice */}
             <div className="min-h-screen bg-white">
               <Header />
               <main>

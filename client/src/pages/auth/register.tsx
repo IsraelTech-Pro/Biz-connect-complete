@@ -22,6 +22,10 @@ export default function Register() {
     momo_number: ''
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
   const { register } = useAuth();
   const { toast } = useToast();
 
@@ -44,6 +48,15 @@ export default function Register() {
         title: "Password Mismatch",
         description: "Passwords do not match",
         variant: "destructive"
+      });
+      return;
+    }
+
+    if (!otpVerified) {
+      toast({
+        title: 'Verify Email',
+        description: 'Please request and verify the OTP sent to your KTU email before creating your account.',
+        variant: 'destructive'
       });
       return;
     }
@@ -96,6 +109,62 @@ export default function Register() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const handleRequestOtp = async () => {
+    const ktuEmailRegex = /^[^\s@]+@ktu\.edu\.gh$/;
+    if (!formData.full_name.trim() || !ktuEmailRegex.test(formData.email)) {
+      toast({
+        title: 'Missing info',
+        description: 'Enter your full name and a valid KTU email before requesting OTP.',
+        variant: 'destructive'
+      });
+      return;
+    }
+    try {
+      setOtpVerifying(true);
+      const resp = await fetch('/api/auth/register-otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: formData.full_name, email: formData.email })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to send OTP');
+      }
+      setOtpSent(true);
+      toast({ title: 'OTP sent', description: 'Check your KTU email for the verification code. If you don\'t see it, please check your Junk/Spam folder.' });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message || 'Failed to send OTP', variant: 'destructive' });
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpSent || !otpCode.trim()) {
+      toast({ title: 'Enter OTP', description: 'Please enter the 6-digit OTP code.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setOtpVerifying(true);
+      const resp = await fetch('/api/auth/register-otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email, otp: otpCode.trim() })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(data.message || 'OTP verification failed');
+      }
+      setOtpVerified(true);
+      toast({ title: 'Email verified', description: 'OTP verified. You can now complete signup.' });
+    } catch (error: any) {
+      setOtpVerified(false);
+      toast({ title: 'Error', description: error.message || 'OTP verification failed', variant: 'destructive' });
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
@@ -124,17 +193,42 @@ export default function Register() {
               />
             </div>
             
-            <div>
-              <Label htmlFor="email">KTU Student Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="yourname@ktu.edu.gh"
-                value={formData.email}
-                onChange={(e) => handleChange('email', e.target.value)}
-                required
-              />
-              <p className="text-xs text-gray-500 mt-1">Must be your official KTU email ending with @ktu.edu.gh</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+              <div className="md:col-span-2">
+                <Label htmlFor="email">KTU Student Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="yourname@ktu.edu.gh"
+                  value={formData.email}
+                  onChange={(e) => handleChange('email', e.target.value)}
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">Must be your official KTU email ending with @ktu.edu.gh</p>
+              </div>
+              <div>
+                <Button type="button" onClick={handleRequestOtp} disabled={otpVerifying || otpVerified} className="w-full">
+                  {otpSent ? 'Resend OTP' : 'Send OTP'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+              <div className="md:col-span-2">
+                <Label htmlFor="otp">Email OTP</Label>
+                <Input
+                  id="otp"
+                  placeholder="Enter 6-digit code"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  disabled={!otpSent || otpVerified}
+                />
+              </div>
+              <div>
+                <Button type="button" onClick={handleVerifyOtp} disabled={!otpSent || otpVerifying || otpVerified} className="w-full">
+                  {otpVerified ? 'Verified' : 'Verify'}
+                </Button>
+              </div>
             </div>
 
             <div>
@@ -199,7 +293,7 @@ export default function Register() {
               className="w-full btn-orange-primary"
               disabled={isLoading}
             >
-              {isLoading ? 'Creating Account...' : 'Create Account'}
+              {isLoading ? 'Creating Account...' : (otpVerified ? 'Create Account' : 'Verify Email to Continue')}
             </Button>
           </form>
 

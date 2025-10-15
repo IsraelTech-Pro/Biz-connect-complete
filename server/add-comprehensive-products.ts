@@ -1,5 +1,3 @@
-import { storage } from "./storage";
-
 // Comprehensive product data for all 11 categories (110 products total)
 const comprehensiveProducts = [
   // Fashion and Apparel (10 products)

@@ -841,14 +841,14 @@ function CreateDiscussionDialog() {
       // Regular users should always use the regular endpoint
       // Only use admin endpoint when specifically in admin interface
       const endpoint = '/api/discussions';
-      const token = authToken;
-      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers,
         body: JSON.stringify(discussionData)
       });
       

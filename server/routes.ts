@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, insertProductSchema, insertOrderSchema, insertSupportRequestSchema, insertVendorSupportRequestSchema, insertPaymentSchema, insertDiscussionSchema, insertCommentSchema, insertLikeSchema, insertQuickSaleSchema, insertQuickSaleProductSchema, insertQuickSaleBidSchema } from "@shared/schema";
+import { insertUserSchema, insertProductSchema, insertOrderSchema, insertSupportRequestSchema, insertVendorSupportRequestSchema, insertPaymentSchema, insertDiscussionSchema, insertCommentSchema, insertLikeSchema, insertQuickSaleSchema, insertQuickSaleProductSchema, insertQuickSaleBidSchema, insertMentorSchema, insertProgramSchema, insertResourceSchema } from "@shared/schema";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import multer from "multer";
@@ -12,11 +12,9 @@ import { createClient } from "@supabase/supabase-js";
 import "./types";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-const PAYSTACK_PUBLIC = process.env.PAYSTACK_PUBLIC_KEY;
+const GOOGLE_APPS_SCRIPT_URL = process.env.GOOGLE_APPS_SCRIPT_URL;
 
-// Import Paystack functions
-import { createTransferRecipient, initiateTransfer } from './paystack-config';
+// Paystack integrations removed
 
 // Configure multer for file uploads
 const uploadDir = path.join(process.cwd(), 'uploads');
@@ -85,21 +83,17 @@ const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
 
   jwt.verify(token, JWT_SECRET, async (err: any, decoded: any) => {
     if (err) return res.status(403).json({ message: 'Invalid token' });
-    
     try {
       const user = await storage.getUser(decoded.id);
       if (!user) {
         return res.status(403).json({ message: 'User not found' });
       }
-      
-      // Check if user account is still approved
       if (!user.is_approved) {
-        return res.status(403).json({ 
+        return res.status(403).json({
           message: 'Your account is not approved by the admin. Please contact the administrator for account activation.',
-          code: 'ACCOUNT_NOT_APPROVED'
+          code: 'ACCOUNT_NOT_APPROVED',
         });
       }
-      
       req.user = user;
       next();
     } catch (error) {
@@ -107,6 +101,75 @@ const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
       return res.status(500).json({ message: 'Authentication error' });
     }
   });
+};
+
+// OTP registration via Google Apps Script email (helpers)
+const otpStore: Map<string, { code: string; expiresAt: number; full_name: string }> = new Map();
+// Separate store for password resets to avoid clobbering registration OTPs
+const resetOtpStore: Map<string, { code: string; expiresAt: number; verified?: boolean }> = new Map();
+
+const sendEmailViaGAS = async (to: string, subject: string, htmlBody: string) => {
+  if (!GOOGLE_APPS_SCRIPT_URL) {
+    throw new Error('GOOGLE_APPS_SCRIPT_URL is not configured');
+  }
+  const resp = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to, subject, htmlBody }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Email send failed: ${resp.status} ${text}`);
+  }
+  return resp.json().catch(() => ({}));
+};
+
+const buildOtpEmail = (fullName: string, otp: string) => {
+  return `
+    <div style="font-family:Inter,Arial,sans-serif;background:#0f172a;padding:24px;color:#e2e8f0">
+      <div style="max-width:560px;margin:0 auto;background:#0b1220;border:1px solid #1e293b;border-radius:12px;overflow:hidden">
+        <div style="padding:20px 24px;background:#f97316;color:#ffffff;font-weight:700;font-size:18px">BizConnect</div>
+        <div style="padding:28px 24px">
+          <h1 style="margin:0 0 12px;font-size:20px;color:#f8fafc">Verify your email</h1>
+          <p style="margin:0 0 16px;color:#94a3b8">Hi ${fullName}, use the OTP below to complete your registration. The code expires in 10 minutes.</p>
+          <div style="display:inline-block;margin:12px 0;padding:12px 20px;border-radius:10px;background:#111827;border:1px solid #374151;color:#f8fafc;font-size:24px;letter-spacing:4px;font-weight:700">${otp}</div>
+          <p style="margin:16px 0 0;color:#64748b;font-size:12px">If you didn’t request this, you can safely ignore this email.</p>
+        </div>
+        <div style="padding:16px 24px;background:#0f172a;color:#94a3b8;font-size:12px">© ${new Date().getFullYear()} BizConnect</div>
+      </div>
+    </div>`;
+};
+
+const buildWelcomeEmail = (fullName: string) => {
+  return `
+    <div style="font-family:Inter,Arial,sans-serif;background:#0f172a;padding:24px;color:#e2e8f0">
+      <div style="max-width:560px;margin:0 auto;background:#0b1220;border:1px solid #1e293b;border-radius:12px;overflow:hidden">
+        <div style="padding:20px 24px;background:linear-gradient(90deg,#22c55e,#86efac);color:#052e16;font-weight:700;font-size:18px">Welcome to BizConnect</div>
+        <div style="padding:28px 24px">
+          <h1 style="margin:0 0 12px;font-size:20px;color:#f8fafc">Registration successful 🎉</h1>
+          <p style="margin:0 0 10px;color:#94a3b8">Hi ${fullName}, your account has been created successfully.</p>
+          <p style="margin:0 0 10px;color:#94a3b8">If admin approval is required, you’ll be notified once your account is activated.</p>
+          <p style="margin:12px 0 0;color:#64748b;font-size:12px">Thanks for joining BizConnect!</p>
+        </div>
+        <div style="padding:16px 24px;background:#0f172a;color:#94a3b8;font-size:12px">© ${new Date().getFullYear()} BizConnect</div>
+      </div>
+    </div>`;
+};
+
+// Generic broadcast template (same style as OTP), used for admin messages to registrants
+const buildBroadcastEmail = (subject: string, content: string) => {
+  const body = String(content ?? '').replace(/\n/g, '<br/>');
+  return `
+    <div style="font-family:Inter,Arial,sans-serif;background:#0f172a;padding:24px;color:#e2e8f0">
+      <div style="max-width:560px;margin:0 auto;background:#0b1220;border:1px solid #1e293b;border-radius:12px;overflow:hidden">
+        <div style="padding:20px 24px;background:#f97316;color:#ffffff;font-weight:700;font-size:18px">BizConnect</div>
+        <div style="padding:28px 24px">
+          <h1 style="margin:0 0 12px;font-size:20px;color:#f8fafc">${subject || 'BizConnect Update'}</h1>
+          <div style="margin:0 0 16px;color:#94a3b8;line-height:1.6">${body}</div>
+        </div>
+        <div style="padding:16px 24px;background:#0f172a;color:#94a3b8;font-size:12px">© ${new Date().getFullYear()} BizConnect</div>
+      </div>
+    </div>`;
 };
 
 // Middleware to check if user is vendor
@@ -160,6 +223,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Serve uploaded files statically
   app.use('/uploads', express.static(uploadDir));
+
+  // Admin authentication
+  app.post('/api/admin/login', async (req: Request, res: Response) => {
+    try {
+      const { username, password } = req.body || {};
+      if (!username || !password) {
+        return res.status(400).json({ message: 'Username and password are required' });
+      }
+
+      const admin = await storage.getAdminUserByUsername(username);
+      if (!admin) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      let valid = false;
+      try {
+        valid = await bcrypt.compare(password, (admin as any).password_hash || '');
+      } catch {
+        valid = false;
+      }
+      if (!valid && (admin as any).password === password) {
+        valid = true;
+      }
+
+      if (!valid) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign(
+        { id: admin.id, type: 'admin', username: admin.username },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      return res.json({
+        token,
+        user: { id: admin.id, username: admin.username, full_name: (admin as any).full_name || admin.username }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Admin login error:', error);
+      return res.status(500).json({ message: 'Failed to login', error: message });
+    }
+  });
 
   // Image upload endpoint
   app.post('/api/upload', authenticateToken, upload.single('image'), async (req, res) => {
@@ -220,6 +327,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Program applications endpoints
+  app.post('/api/programs/:programId/applications', async (req, res) => {
+    try {
+      const { programId } = req.params;
+      const { full_name, email, message, phone } = req.body || {};
+      if (!programId) {
+        return res.status(400).json({ message: 'programId is required' });
+      }
+      if (!full_name || !email) {
+        return res.status(400).json({ message: 'full_name and email are required' });
+      }
+      // Enforce KTU email for program applications
+      const ktuEmailRegex = /^[^\s@]+@ktu\.edu\.gh$/i;
+      if (!ktuEmailRegex.test(String(email))) {
+        return res.status(400).json({ message: 'Only KTU students can apply. Please use your official KTU email ending with @ktu.edu.gh' });
+      }
+      const row = await storage.createProgramApplication({
+        program_id: programId,
+        full_name,
+        email,
+        message: message || null,
+        phone: phone || null,
+      });
+      if (!row) {
+        return res.status(500).json({ message: 'Failed to save application' });
+      }
+      return res.status(201).json(row);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error creating program application:', error);
+      return res.status(500).json({ message: 'Failed to create application', error: message });
+    }
+  });
+
+  app.get('/api/admin/programs/:programId/applications', authenticateAdminToken, async (req, res) => {
+    try {
+      const { programId } = req.params;
+      if (!programId) {
+        return res.status(400).json({ message: 'programId is required' });
+      }
+      const rows = await storage.getProgramApplicationsByProgramId(programId);
+      return res.json(Array.isArray(rows) ? rows : []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching program applications:', error);
+      return res.status(500).json({ message: 'Failed to fetch applications', error: message });
+    }
+  });
+
+  // Email selected registrants for a program
+  app.post('/api/admin/programs/:programId/applications/email', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      const { programId } = req.params;
+      const { subject, message, emails } = req.body || {};
+      if (!programId) return res.status(400).json({ message: 'programId is required' });
+      if (!subject || !message) return res.status(400).json({ message: 'subject and message are required' });
+      if (!Array.isArray(emails) || emails.length === 0) return res.status(400).json({ message: 'emails must be a non-empty array' });
+
+      // Optionally, verify that provided emails belong to this program's registrants
+      const registrants = await storage.getProgramApplicationsByProgramId(programId);
+      const registrantEmails = new Set(registrants.map(r => (r.email || '').toLowerCase()));
+      const filtered = emails.filter((e: string) => registrantEmails.has(String(e).toLowerCase()));
+      const targets = filtered.length > 0 ? filtered : emails; // fallback to provided list if none matched
+
+      for (const to of targets) {
+        try {
+          // Try to personalize greeting if registrant record is available
+          const rec = registrants.find(r => String(r.email || '').toLowerCase() === String(to).toLowerCase());
+          const name = rec?.full_name ? String(rec.full_name) : '';
+          const personalized = name ? `Hi ${name},\n\n${message}` : String(message);
+          const html = buildBroadcastEmail(subject, personalized);
+          await sendEmailViaGAS(to, subject, html);
+        } catch (err) {
+          console.error('Failed sending to', to, err);
+        }
+      }
+      return res.json({ message: 'Emails dispatched', count: targets.length });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('Error emailing registrants:', error);
+      return res.status(500).json({ message: 'Failed to email registrants', error: msg });
+    }
+  });
+
   // Auth routes
   app.post('/api/auth/register', async (req, res) => {
     try {
@@ -229,6 +420,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ktuEmailRegex = /^[^\s@]+@ktu\.edu\.gh$/;
       if (!ktuEmailRegex.test(userData.email)) {
         return res.status(400).json({ message: 'Only KTU students can register. Please use your official KTU email ending with @ktu.edu.gh' });
+      }
+      // Require verified OTP before creating the account
+      const otpRecord = otpStore.get(userData.email.toLowerCase());
+      if (!otpRecord || !('verified' in otpRecord) || !(otpRecord as any).verified || Date.now() > otpRecord.expiresAt) {
+        return res.status(400).json({ message: 'Please verify your email with the OTP before completing signup.' });
       }
       
       const existingUser = await storage.getUserByEmail(userData.email);
@@ -244,45 +440,186 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Since new users need admin approval, don't create a token or log them in immediately
+      // Clear OTP record after successful registration
+      otpStore.delete(user.email.toLowerCase());
       res.json({ 
         user: { ...user, password: undefined }, 
         message: 'Account created successfully! Your account is pending admin approval. You will be able to log in once an administrator activates your account.',
         requiresApproval: true
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Registration error:', error);
-      res.status(400).json({ message: 'Invalid user data', error: error.message });
+      res.status(400).json({ message: 'Invalid user data', error: message });
+    }
+  });
+
+  // OTP Registration endpoints
+  app.post('/api/auth/register-otp/request', async (req: Request, res: Response) => {
+    try {
+      const { full_name, email } = req.body || {};
+      if (!full_name || !email) {
+        return res.status(400).json({ message: 'full_name and email are required' });
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: 'Invalid email format' });
+      }
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
+      otpStore.set(email.toLowerCase(), { code, expiresAt, full_name });
+      try {
+        await sendEmailViaGAS(email, 'Your BizConnect OTP Code', buildOtpEmail(full_name, code));
+        return res.json({ ok: true, message: 'OTP sent to email' });
+      } catch (sendErr) {
+        console.error('Email send failed, falling back. Error:', sendErr);
+        if (process.env.NODE_ENV !== 'production') {
+          // For development, expose OTP to allow testing without email delivery
+          return res.json({ ok: true, message: 'OTP generated (dev mode). Email send failed.', debugOtp: code });
+        }
+        return res.status(502).json({ message: 'Failed to send OTP email. Please try again later.' });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('OTP request error:', error);
+      res.status(500).json({ message: 'Failed to send OTP', error: message });
+    }
+  });
+
+  app.post('/api/auth/register-otp/verify', async (req: Request, res: Response) => {
+    try {
+      const { email, otp } = req.body || {};
+      if (!email || !otp) {
+        return res.status(400).json({ message: 'email and otp are required' });
+      }
+      const record = otpStore.get(email.toLowerCase());
+      if (!record || record.code !== otp) {
+        return res.status(400).json({ message: 'Invalid OTP' });
+      }
+      if (Date.now() > record.expiresAt) {
+        otpStore.delete(email.toLowerCase());
+        return res.status(400).json({ message: 'OTP expired' });
+      }
+      // Mark OTP as verified (extend validity window for completing registration)
+      (record as any).verified = true;
+      record.expiresAt = Date.now() + 10 * 60 * 1000; // give 10 more minutes to finish signup
+      otpStore.set(email.toLowerCase(), record);
+      res.json({ ok: true, message: 'OTP verified. You can now complete your registration.' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('OTP verify error:', error);
+      res.status(500).json({ message: 'Failed to verify OTP', error: message });
+    }
+  });
+
+  // Password Reset via OTP
+  app.post('/api/auth/password-reset/request', async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body || {};
+      if (!email) {
+        return res.status(400).json({ message: 'email is required' });
+      }
+      const emailStr = String(email).toLowerCase();
+      const user = await storage.getUserByEmail(emailStr);
+      if (!user) {
+        return res.status(404).json({ message: 'No account found for this email' });
+      }
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
+      resetOtpStore.set(emailStr, { code, expiresAt });
+      try {
+        const html = buildOtpEmail(user.full_name || 'User', code);
+        await sendEmailViaGAS(user.email, 'Your BizConnect Password Reset Code', html);
+        return res.json({ ok: true, message: 'Password reset code sent. Check your email (and Junk/Spam folder).' });
+      } catch (sendErr) {
+        console.error('Password reset email failed:', sendErr);
+        if (process.env.NODE_ENV !== 'production') {
+          return res.json({ ok: true, message: 'Dev mode: email failed, returning code.', debugOtp: code });
+        }
+        return res.status(502).json({ message: 'Failed to send reset code. Please try again later.' });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Password reset request error:', error);
+      res.status(500).json({ message: 'Failed to start password reset', error: message });
+    }
+  });
+
+  app.post('/api/auth/password-reset/verify', async (req: Request, res: Response) => {
+    try {
+      const { email, otp } = req.body || {};
+      if (!email || !otp) {
+        return res.status(400).json({ message: 'email and otp are required' });
+      }
+      const emailStr = String(email).toLowerCase();
+      const record = resetOtpStore.get(emailStr);
+      if (!record || record.code !== String(otp)) {
+        return res.status(400).json({ message: 'Invalid OTP' });
+      }
+      if (Date.now() > record.expiresAt) {
+        resetOtpStore.delete(emailStr);
+        return res.status(400).json({ message: 'OTP expired' });
+      }
+      record.verified = true;
+      record.expiresAt = Date.now() + 10 * 60 * 1000;
+      resetOtpStore.set(emailStr, record);
+      res.json({ ok: true, message: 'OTP verified. You can now reset your password.' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Password reset verify error:', error);
+      res.status(500).json({ message: 'Failed to verify OTP', error: message });
+    }
+  });
+
+  app.post('/api/auth/password-reset/complete', async (req: Request, res: Response) => {
+    try {
+      const { email, new_password } = req.body || {};
+      if (!email || !new_password) {
+        return res.status(400).json({ message: 'email and new_password are required' });
+      }
+      const emailStr = String(email).toLowerCase();
+      const record = resetOtpStore.get(emailStr);
+      if (!record || !record.verified || Date.now() > record.expiresAt) {
+        return res.status(400).json({ message: 'OTP not verified or expired' });
+      }
+      const user = await storage.getUserByEmail(emailStr);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      const hashed = await bcrypt.hash(String(new_password), 10);
+      await storage.updateUser(user.id, { password: hashed });
+      resetOtpStore.delete(emailStr);
+      res.json({ ok: true, message: 'Password has been reset successfully' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Password reset complete error:', error);
+      res.status(500).json({ message: 'Failed to reset password', error: message });
     }
   });
 
   app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body;
-      
-      // Validate email format
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         return res.status(400).json({ message: 'Invalid email format. Please use a valid email address (e.g., user@example.com)' });
       }
-      
       const user = await storage.getUserByEmail(email);
-      
       if (!user || !await bcrypt.compare(password, user.password)) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
-
-      // Check if user account is approved by admin
       if (!user.is_approved) {
-        return res.status(403).json({ 
+        return res.status(403).json({
           message: 'Your account is not approved by the admin. Please contact the administrator for account activation.',
-          code: 'ACCOUNT_NOT_APPROVED'
+          code: 'ACCOUNT_NOT_APPROVED',
         });
       }
-
       const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET);
       res.json({ user: { ...user, password: undefined }, token });
     } catch (error) {
-      res.status(500).json({ message: 'Login failed' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Login error:', error);
+      res.status(500).json({ message: 'Login failed', error: message });
     }
   });
 
@@ -297,7 +634,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ ...user, password: undefined });
     } catch (error) {
-      res.status(500).json({ message: 'Failed to get user' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching user:', error);
+      res.status(500).json({ message: 'Failed to get user', error: message });
     }
   });
 
@@ -340,8 +679,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ ...updatedUser, password: undefined });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('User update error:', error);
-      res.status(500).json({ message: 'Failed to update user', error: error.message });
+      res.status(500).json({ message: 'Failed to update user', error: message });
     }
   });
 
@@ -366,8 +706,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Ensure we always return an array
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching products:', error);
-      res.status(500).json({ message: 'Failed to get products' });
+      res.status(500).json({ message: 'Failed to get products', error: message });
     }
   });
 
@@ -377,8 +718,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getFlashSaleProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching flash sale products:', error);
-      res.status(500).json({ message: 'Failed to get flash sale products' });
+      res.status(500).json({ message: 'Failed to get flash sale products', error: message });
     }
   });
 
@@ -387,8 +729,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getClearanceProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching clearance products:', error);
-      res.status(500).json({ message: 'Failed to get clearance products' });
+      res.status(500).json({ message: 'Failed to get clearance products', error: message });
     }
   });
 
@@ -397,8 +740,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getTrendingProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching trending products:', error);
-      res.status(500).json({ message: 'Failed to get trending products' });
+      res.status(500).json({ message: 'Failed to get trending products', error: message });
     }
   });
 
@@ -407,8 +751,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getNewThisWeekProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching new this week products:', error);
-      res.status(500).json({ message: 'Failed to get new this week products' });
+      res.status(500).json({ message: 'Failed to get new this week products', error: message });
     }
   });
 
@@ -417,8 +762,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getTopSellingProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching top selling products:', error);
-      res.status(500).json({ message: 'Failed to get top selling products' });
+      res.status(500).json({ message: 'Failed to get top selling products', error: message });
     }
   });
 
@@ -427,8 +773,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getFeaturedProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching featured products:', error);
-      res.status(500).json({ message: 'Failed to get featured products' });
+      res.status(500).json({ message: 'Failed to get featured products', error: message });
     }
   });
 
@@ -437,8 +784,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getHotDealsProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching hot deals products:', error);
-      res.status(500).json({ message: 'Failed to get hot deals products' });
+      res.status(500).json({ message: 'Failed to get hot deals products', error: message });
     }
   });
 
@@ -447,8 +795,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getDontMissProducts();
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching dont miss products:', error);
-      res.status(500).json({ message: 'Failed to get dont miss products' });
+      res.status(500).json({ message: 'Failed to get dont miss products', error: message });
     }
   });
 
@@ -459,8 +808,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const products = await storage.getProductsByFilter(filters);
       res.json(Array.isArray(products) ? products : []);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error filtering products:', error);
-      res.status(500).json({ message: 'Failed to filter products' });
+      res.status(500).json({ message: 'Failed to filter products', error: message });
     }
   });
 
@@ -472,7 +822,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(product);
     } catch (error) {
-      res.status(500).json({ message: 'Failed to get product' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching product:', error);
+      res.status(500).json({ message: 'Failed to get product', error: message });
     }
   });
 
@@ -517,7 +869,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         meta_description: null,
         search_keywords: [], // Empty array for vendors
         // Ensure arrays are properly handled
-        tags: Array.isArray(req.body.tags) ? req.body.tags : (req.body.tags ? req.body.tags.split(',').map(t => t.trim()) : []),
+        tags: Array.isArray(req.body.tags) ? req.body.tags : (req.body.tags ? req.body.tags.split(',').map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0) : []),
         product_images: Array.isArray(req.body.product_images) ? req.body.product_images : [],
         // Remove any old images field that might be present
         images: undefined
@@ -532,8 +884,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const product = await storage.createProduct(productData);
       res.json(product);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Product creation error:', error);
-      res.status(400).json({ message: 'Invalid product data', error: error.message });
+      res.status(400).json({ message: 'Invalid product data', error: message });
     }
   });
 
@@ -566,7 +919,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sku: req.body.sku || null,
         dimensions: req.body.dimensions || null,
         // Ensure arrays are properly handled
-        tags: Array.isArray(req.body.tags) ? req.body.tags : (req.body.tags ? req.body.tags.split(',').map(t => t.trim()) : []),
+        tags: Array.isArray(req.body.tags) ? req.body.tags : (req.body.tags ? req.body.tags.split(',').map((t: string) => t.trim()) : []),
         product_images: Array.isArray(req.body.product_images) ? req.body.product_images : [],
         updated_at: new Date(),
         // Remove promotional, SEO, and flash sale fields - vendors cannot modify these
@@ -590,8 +943,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedProduct = await storage.updateProduct(req.params.id, productData);
       res.json(updatedProduct);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Product update error:', error);
-      res.status(400).json({ message: 'Failed to update product', error: error.message });
+      res.status(400).json({ message: 'Failed to update product', error: message });
     }
   });
 
@@ -608,7 +962,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteProduct(req.params.id);
       res.json({ message: 'Product deleted' });
     } catch (error) {
-      res.status(500).json({ message: 'Failed to delete product' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting product:', error);
+      res.status(500).json({ message: 'Failed to delete product', error: message });
     }
   });
 
@@ -654,8 +1010,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json(orders);
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error in orders API:', error);
-      res.status(500).json({ message: 'Failed to get orders', error: error.message });
+      res.status(500).json({ message: 'Failed to get orders', error: message });
     }
   });
 
@@ -663,81 +1020,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const orderData = insertOrderSchema.parse(req.body);
       const order = await storage.createOrder(orderData);
-      
-      // Verify payment with Paystack if payment_id is provided
-      if (orderData.payment_id && PAYSTACK_SECRET) {
-        try {
-          const response = await fetch(`https://api.paystack.co/transaction/verify/${orderData.payment_id}`, {
-            headers: {
-              'Authorization': `Bearer ${PAYSTACK_SECRET}`
-            }
-          });
-          
-          const paymentData = await response.json();
-          
-          if (paymentData.status && paymentData.data.status === 'success') {
-            // Payment verified, update order status
-            await storage.updateOrder(order.id, { status: 'confirmed' });
-            
-            // Note: Vendor payouts should be processed manually by admin
-            // All payments go to platform first, then admin processes vendor payouts
-            console.log(`Payment verified for order ${order.id}. Amount: ${paymentData.data.amount / 100} GHS`);
-            console.log(`Vendor payout will be processed manually by admin`);
-          }
-        } catch (paymentError) {
-          console.error('Payment verification error:', paymentError);
-        }
-      }
-      
       res.json(order);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Order creation error:', error);
-      res.status(400).json({ message: 'Invalid order data', error: error.message });
+      res.status(400).json({ message: 'Invalid order data', error: message });
     }
   });
 
-  // Function to process vendor payout
-  async function processVendorPayout(order: any) {
-    const vendor = await storage.getUser(order.vendor_id);
-    if (!vendor || !vendor.momo_number) {
-      throw new Error('Vendor mobile money number not found');
-    }
-
-    // Create transfer recipient for vendor
-    const recipientData = {
-      type: 'mobile_money',
-      name: vendor.business_name || vendor.full_name,
-      account_number: vendor.momo_number,
-      bank_code: 'MTN' // Default to MTN, could be made dynamic
-    };
-
-    const recipientResponse = await createTransferRecipient(recipientData);
-    
-    if (!recipientResponse.status) {
-      throw new Error('Failed to create transfer recipient');
-    }
-
-    // Calculate vendor payout (total amount minus platform fee)
-    const platformFee = order.amount * 0.05; // 5% platform fee
-    const vendorPayout = order.amount - platformFee;
-
-    // Initiate transfer to vendor
-    const transferData = {
-      source: 'balance',
-      amount: vendorPayout,
-      recipient: recipientResponse.data.recipient_code,
-      reason: `Payout for order ${order.id}`,
-      reference: `PAYOUT-${order.id}-${Date.now()}`
-    };
-
-    const transferResponse = await initiateTransfer(transferData);
-    
-    if (!transferResponse.status) {
-      throw new Error('Failed to initiate transfer to vendor');
-    }
-
-    console.log(`Vendor payout initiated: ${vendorPayout} GHS to ${vendor.momo_number}`);
-  }
+  // Vendor payout function removed (Paystack integration removed)
 
   app.put('/api/orders/:id', authenticateToken, async (req, res) => {
     try {
@@ -875,20 +1166,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Admin settings moved to dedicated admin endpoints below
 
-  // Paystack public key endpoint
-  app.get('/api/paystack/public-key', (req, res) => {
-    res.json({ 
-      publicKey: PAYSTACK_PUBLIC,
-      configured: !!PAYSTACK_PUBLIC && !!PAYSTACK_SECRET
-    });
-  });
+  // Paystack public key endpoint removed
 
   // Direct SQL database update endpoint
   app.post('/api/database/alter-tables', async (req, res) => {
     try {
       const { createClient } = await import('@supabase/supabase-js');
-      const supabaseUrl = process.env.SUPABASE_URL || `https://${process.env.DATABASE_URL.split('@')[1].split('/')[0]}`;
+      const dbUrl = process.env.DATABASE_URL;
+      const supabaseUrl = process.env.SUPABASE_URL || (dbUrl ? `https://${dbUrl.split('@')[1].split('/')[0]}` : undefined);
       const supabaseKey = process.env.SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseKey) {
+        return res.status(500).json({ status: false, message: 'Supabase configuration is missing' });
+      }
       
       const supabase = createClient(supabaseUrl, supabaseKey);
       
@@ -927,11 +1216,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         data: { paymentsUpdated: true, payoutsUpdated: true, existingPaymentUpdated: !updateError }
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Database alter error:', error);
       res.status(500).json({ 
         status: false, 
         message: 'Failed to alter database tables',
-        error: error.message 
+        error: message
       });
     }
   });
@@ -982,402 +1272,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         data: payment 
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Test payment creation error:', error);
       res.status(500).json({ 
         status: false, 
         message: 'Failed to create test payment',
-        error: error.message 
+        error: message 
       });
-    }
-  });
-
-  // Payment routes - Direct vendor payments with callback handling
-  app.post('/api/payments/initialize', async (req, res) => {
-    try {
-      const { 
-        email, 
-        amount, 
-        mobile_number, 
-        provider, 
-        payment_method,
-        order_id,
-        vendor_id,
-        buyer_id
-      } = req.body;
-      
-      console.log('Initializing payment:', { 
-        email, 
-        amount, 
-        mobile_number, 
-        provider, 
-        payment_method,
-        order_id,
-        vendor_id,
-        buyer_id
-      });
-      
-      if (!email || !amount || !order_id || !vendor_id || !buyer_id) {
-        return res.status(400).json({ 
-          status: false, 
-          message: 'Missing required fields: email, amount, order_id, vendor_id, buyer_id' 
-        });
-      }
-
-      // Generate unique payment reference
-      const reference = `VH_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Get vendor information for subaccount
-      const vendor = await storage.getUser(vendor_id);
-      if (!vendor) {
-        return res.status(404).json({ 
-          status: false, 
-          message: 'Vendor not found' 
-        });
-      }
-
-      // Create payment record in database
-      const paymentData = {
-        reference,
-        order_id,
-        vendor_id,
-        buyer_id,
-        amount: amount.toString(),
-        currency: 'GHS',
-        payment_method,
-        mobile_number: mobile_number || null,
-        network_provider: provider || null,
-        status: 'pending'
-      };
-      
-      const payment = await storage.createPayment(paymentData);
-      
-      // Prepare Paystack payment data
-      const paystackData: any = {
-        email,
-        amount: Math.round(amount * 100), // Convert to kobo
-        reference,
-        callback_url: `${req.protocol}://${req.get('host')}/api/payments/callback`,
-      };
-
-      // Add mobile money specific fields
-      if (payment_method === 'mobile_money' && mobile_number && provider) {
-        paystackData.mobile_number = mobile_number;
-        paystackData.provider = provider;
-        paystackData.channels = ['mobile_money'];
-      }
-      
-      // Add subaccount for direct vendor payment
-      if (vendor.paystack_subaccount) {
-        paystackData.subaccount = vendor.paystack_subaccount;
-      }
-
-      const response = await fetch('https://api.paystack.co/transaction/initialize', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${PAYSTACK_SECRET}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(paystackData),
-      });
-
-      const data = await response.json();
-      console.log('Paystack payment response:', data);
-      
-      if (!response.ok) {
-        return res.status(400).json({ 
-          status: false, 
-          message: data.message || 'Payment initialization failed' 
-        });
-      }
-
-      // Update payment with Paystack response
-      await storage.updatePayment(payment.id, {
-        paystack_reference: data.data.reference,
-        authorization_url: data.data.authorization_url,
-        access_code: data.data.access_code
-      });
-
-      res.json({
-        status: true,
-        message: 'Payment initialized successfully',
-        data: {
-          authorization_url: data.data.authorization_url,
-          access_code: data.data.access_code,
-          reference: data.data.reference,
-          payment_id: payment.id
-        }
-      });
-    } catch (error) {
-      console.error('Payment initialization error:', error);
-      res.status(500).json({ 
-        status: false, 
-        message: 'Internal server error' 
-      });
-    }
-  });
-
-  // Mobile money payment initialization
-  app.post('/api/payments/initialize-mobile-money', authenticateToken, async (req, res) => {
-    try {
-      const { email, amount, mobile_number, provider } = req.body;
-      
-      if (!PAYSTACK_SECRET) {
-        return res.status(400).json({ 
-          status: false, 
-          message: 'Paystack secret key is not configured' 
-        });
-      }
-      
-      console.log('Initializing mobile money payment:', {
-        email,
-        amount,
-        mobile_number,
-        provider
-      });
-      
-      // Generate unique payment reference
-      const reference = `VH_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Get current user from request
-      const user = req.user as any;
-      console.log('User from token:', user);
-      if (!user) {
-        console.log('No user found in request');
-        return res.status(401).json({ 
-          status: false, 
-          message: 'User not authenticated' 
-        });
-      }
-      
-      // Get vendor information for the product (in real implementation, this would be passed from frontend)
-      const product = await storage.getProduct('1838f031-2cf6-42ae-a57a-a3bba6aeb04b');
-      if (!product) {
-        return res.status(404).json({
-          status: false,
-          message: 'Product not found'
-        });
-      }
-      
-      // Get vendor details including paystack_subaccount
-      console.log('Fetching vendor with ID:', product.vendor_id);
-      const vendor = await storage.getUser(product.vendor_id);
-      if (!vendor) {
-        console.log('Vendor not found for ID:', product.vendor_id);
-        return res.status(404).json({
-          status: false,
-          message: 'Vendor not found'
-        });
-      }
-      
-      console.log('Vendor found:', {
-        id: vendor.id,
-        name: vendor.full_name,
-        business_name: vendor.business_name,
-        paystack_subaccount: vendor.paystack_subaccount
-      });
-      
-      // Create order for mobile money payment
-      const orderData = {
-        buyer_id: user.id,
-        vendor_id: product.vendor_id, // Use actual vendor ID from product
-        product_id: product.id,
-        quantity: 1,
-        total_amount: amount.toString(),
-        status: 'pending',
-        shipping_address: 'Mobile Money Test Address',
-        phone: user.phone || mobile_number,
-        notes: 'Mobile money payment order'
-      };
-      
-      const order = await storage.createOrder(orderData);
-      
-      // Create payment record in database
-      const paymentData = {
-        reference,
-        order_id: order.id,
-        vendor_id: product.vendor_id, // Use actual vendor ID
-        buyer_id: user.id,
-        amount: amount.toString(),
-        currency: 'GHS',
-        payment_method: 'mobile_money',
-        mobile_number,
-        network_provider: provider,
-        status: 'pending'
-      };
-      
-      const payment = await storage.createPayment(paymentData);
-      console.log('Payment record created:', payment);
-      
-      // Prepare payment initialization with vendor subaccount if available
-      const paymentPayload: any = {
-        email,
-        amount: amount * 100, // Convert to kobo
-        reference,
-        channels: ['mobile_money'],
-        mobile_money: {
-          phone: mobile_number,
-          provider: provider
-        },
-        callback_url: `${req.protocol}://${req.get('host')}/api/payments/callback`,
-        metadata: {
-          cancel_action: `${req.protocol}://${req.get('host')}/api/payments/callback`,
-          vendor_id: product.vendor_id,
-          order_id: order.id
-        }
-      };
-      
-      // Include subaccount for direct vendor payment if available
-      if (vendor.paystack_subaccount) {
-        paymentPayload.subaccount = vendor.paystack_subaccount;
-        console.log('Using vendor subaccount for direct payment:', vendor.paystack_subaccount);
-      }
-      
-      const response = await fetch('https://api.paystack.co/transaction/initialize', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${PAYSTACK_SECRET}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(paymentPayload)
-      });
-      
-      const data = await response.json();
-      console.log('Paystack mobile money response:', data);
-      
-      if (!response.ok) {
-        return res.status(400).json({ 
-          status: false, 
-          message: data.message || 'Payment initialization failed' 
-        });
-      }
-      
-      // Update payment with Paystack response
-      await storage.updatePayment(payment.id, {
-        paystack_reference: data.data.reference,
-        authorization_url: data.data.authorization_url,
-        access_code: data.data.access_code
-      });
-      
-      res.json({
-        status: true,
-        message: 'Authorization URL created',
-        data: {
-          authorization_url: data.data.authorization_url,
-          access_code: data.data.access_code,
-          reference: data.data.reference,
-          payment_id: payment.id,
-          order_id: order.id
-        }
-      });
-    } catch (error) {
-      console.error('Mobile money initialization error:', error);
-      res.status(500).json({ 
-        status: false, 
-        message: 'Failed to initialize mobile money payment',
-        error: error.message
-      });
-    }
-  });
-
-  // Payment callback route - handles both success and failure
-  app.get('/api/payments/callback', async (req, res) => {
-    const { reference, trxref } = req.query;
-    const paymentReference = reference || trxref;
-    
-    console.log('Payment callback received:', { reference, trxref, paymentReference });
-    
-    if (paymentReference) {
-      try {
-        // Find payment in database
-        const payment = await storage.getPaymentByReference(paymentReference as string);
-        
-        if (!payment) {
-          console.log('Payment not found in database:', paymentReference);
-          return res.redirect(`/payment-result?status=failed&reason=payment_not_found`);
-        }
-
-        // Verify payment with Paystack
-        const response = await fetch(`https://api.paystack.co/transaction/verify/${paymentReference}`, {
-          headers: {
-            'Authorization': `Bearer ${PAYSTACK_SECRET}`
-          }
-        });
-        
-        const paymentData = await response.json();
-        console.log('Payment verification response:', paymentData);
-        
-        if (paymentData.status && paymentData.data.status === 'success') {
-          // Payment verified successfully - update payment status
-          await storage.updatePayment(payment.id, {
-            status: 'success',
-            gateway_response: paymentData.data.gateway_response,
-            paid_at: new Date()
-          });
-          
-          // Update order status (skip if fails due to schema issues)
-          try {
-            await storage.updateOrder(payment.order_id, { 
-              status: 'confirmed'
-            });
-            console.log('Order status updated successfully');
-          } catch (orderError) {
-            console.error('Failed to update order status (continuing with payment success):', orderError);
-            // Continue with payment success even if order update fails
-          }
-          
-          console.log(`Payment successful: ${paymentReference} - Amount: ${paymentData.data.amount / 100} GHS`);
-          
-          // Redirect to success page with order details
-          res.redirect(`/payment-result?status=success&reference=${paymentReference}&amount=${paymentData.data.amount / 100}&order_id=${payment.order_id}`);
-        } else {
-          // Payment failed verification
-          const errorMessage = paymentData.data?.gateway_response || paymentData.message || 'Payment failed';
-          await storage.updatePayment(payment.id, {
-            status: 'failed',
-            gateway_response: errorMessage
-          });
-          
-          console.log(`Payment failed: ${paymentReference} - Reason: ${errorMessage}`);
-          
-          res.redirect(`/payment-result?status=failed&reason=payment_failed&reference=${paymentReference}`);
-        }
-      } catch (error) {
-        console.error('Payment verification error:', error);
-        
-        // Update payment as failed if found
-        try {
-          const payment = await storage.getPaymentByReference(paymentReference as string);
-          if (payment) {
-            await storage.updatePayment(payment.id, {
-              status: 'failed',
-              gateway_response: 'Verification error'
-            });
-          }
-        } catch (updateError) {
-          console.error('Failed to update payment status:', updateError);
-        }
-        
-        res.redirect(`/payment-result?status=failed&reason=verification_error&reference=${paymentReference}`);
-      }
-    } else {
-      res.redirect('/payment-result?status=failed&reason=no_reference');
-    }
-  });
-
-  app.post('/api/payments/verify', async (req, res) => {
-    try {
-      const { reference } = req.body;
-      
-      const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-        headers: {
-          'Authorization': `Bearer ${PAYSTACK_SECRET}`
-        }
-      });
-      
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      res.status(500).json({ message: 'Failed to verify payment' });
     }
   });
 
@@ -1410,8 +1311,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payment = await storage.createPayment(testPayment);
       res.json({ status: true, payment });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error creating test payment:', error);
-      res.status(500).json({ status: false, message: 'Failed to create test payment' });
+      res.status(500).json({ status: false, message: 'Failed to create test payment', error: message });
     }
   });
 
@@ -1430,8 +1332,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stats = await storage.getVendorStats(req.params.id);
       res.json(stats);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching vendor stats:', error);
-      res.status(500).json({ message: 'Failed to get vendor stats' });
+      res.status(500).json({ message: 'Failed to get vendor stats', error: message });
     }
   });
 
@@ -1454,57 +1357,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json(payouts);
     } catch (error) {
-      res.status(500).json({ message: 'Failed to get payouts' });
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message: 'Failed to get payouts', error: message });
     }
   });
 
-  app.post('/api/payouts/transfer', authenticateToken, requireAdmin, async (req, res) => {
-    try {
-      const { vendor_id, amount, momo_number } = req.body;
-      
-      // Create transfer recipient
-      const recipientResponse = await fetch('https://api.paystack.co/transferrecipient', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${PAYSTACK_SECRET}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          type: 'mobile_money',
-          name: 'Vendor',
-          account_number: momo_number,
-          bank_code: 'MTN',
-          currency: 'GHS'
-        })
-      });
-      
-      const recipientData = await recipientResponse.json();
-      
-      if (!recipientData.status) {
-        return res.status(400).json({ message: 'Failed to create transfer recipient' });
-      }
-      
-      // Initiate transfer
-      const transferResponse = await fetch('https://api.paystack.co/transfer', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${PAYSTACK_SECRET}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          source: 'balance',
-          amount: amount * 100, // Convert to pesewas
-          recipient: recipientData.data.recipient_code,
-          reason: 'Vendor payout'
-        })
-      });
-      
-      const transferData = await transferResponse.json();
-      res.json(transferData);
-    } catch (error) {
-      res.status(500).json({ message: 'Failed to initiate payout' });
-    }
-  });
+  // Payout transfer endpoint removed (Paystack integration removed)
 
   // Support request routes
   app.post('/api/support-requests', async (req, res) => {
@@ -1513,7 +1371,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const newSupportRequest = await storage.createSupportRequest(supportRequest);
       res.json(newSupportRequest);
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(400).json({ error: message });
     }
   });
 
@@ -1523,19 +1382,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const newVendorSupportRequest = await storage.createVendorSupportRequest(vendorSupportRequest);
       res.json(newVendorSupportRequest);
     } catch (error) {
-      res.status(400).json({ error: error.message });
-    }
-  });
-
-  // Setup route to populate database with sample data
-  app.post('/api/setup-data', async (req, res) => {
-    try {
-      const { setupSupabaseData } = await import('./setup-supabase');
-      await setupSupabaseData();
-      res.json({ message: 'Database populated with sample data successfully' });
-    } catch (error) {
-      console.error('Error setting up data:', error);
-      res.status(500).json({ message: 'Failed to setup data' });
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(400).json({ error: message });
     }
   });
 
@@ -1549,8 +1397,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         result 
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error adding comprehensive products:', error);
-      res.status(500).json({ message: 'Failed to add comprehensive products' });
+      res.status(500).json({ message: 'Failed to add comprehensive products', error: message });
     }
   });
 
@@ -1561,8 +1410,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stats = await storage.getVendorStats(vendorId);
       res.json(stats);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching vendor stats:', error);
-      res.status(500).json({ message: 'Failed to fetch vendor stats' });
+      res.status(500).json({ message: 'Failed to fetch vendor stats', error: message });
     }
   });
 
@@ -1597,37 +1447,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Dashboard API routes
   
-  // Sync Paystack data
-  app.post('/api/sync/transactions', requireAdmin, async (req, res) => {
-    try {
-      const { databaseSync } = await import('./database-sync');
-      await databaseSync.syncTransactions();
-      res.json({ success: true, message: 'Transactions synced successfully' });
-    } catch (error) {
-      console.error('Transaction sync error:', error);
-      res.status(500).json({ 
-        success: false, 
-        message: 'Failed to sync transactions',
-        error: error.message 
-      });
-    }
-  });
-
-  app.post('/api/sync/payouts', requireAdmin, async (req, res) => {
-    try {
-      const { databaseSync } = await import('./database-sync');
-      await databaseSync.syncPayouts();
-      res.json({ success: true, message: 'Payouts synced successfully' });
-    } catch (error) {
-      console.error('Payout sync error:', error);
-      res.status(500).json({ 
-        success: false, 
-        message: 'Failed to sync payouts',
-        error: error.message 
-      });
-    }
-  });
-
+  // Sync data
   app.post('/api/sync/all', requireAdmin, async (req, res) => {
     try {
       const { databaseSync } = await import('./database-sync');
@@ -1638,7 +1458,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ 
         success: false, 
         message: 'Failed to sync all data',
-        error: error.message 
+        error: (error instanceof Error ? error.message : String(error)) 
       });
     }
   });
@@ -1646,28 +1466,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Manual sync route for testing without admin requirement
   app.post('/api/sync/manual', authenticateToken, async (req, res) => {
     try {
-      const { paystackDatabaseSync } = await import('./paystack-database-sync');
-      console.log('Starting manual Paystack sync...');
-      
-      // Sync transactions to payments table
-      await paystackDatabaseSync.syncTransactionsToPayments();
-      console.log('Paystack transactions synced to payments table');
-      
-      // Sync transfers to payouts table
-      await paystackDatabaseSync.syncTransfersToPayouts();
-      console.log('Paystack transfers synced to payouts table');
+      console.log('Starting manual sync...');
       
       res.json({ 
         success: true, 
-        message: 'Manual Paystack sync completed successfully',
+        message: 'Manual sync completed successfully',
         timestamp: new Date().toISOString()
       });
     } catch (error) {
-      console.error('Manual Paystack sync error:', error);
+      console.error('Manual sync error:', error);
       res.status(500).json({ 
         success: false, 
-        message: 'Manual Paystack sync failed',
-        error: error.message 
+        message: 'Manual sync failed',
+        error: (error instanceof Error ? error.message : String(error)) 
       });
     }
   });
@@ -1675,6 +1486,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Vendor Dashboard API - Using existing payments table
   app.get('/api/dashboard/vendor/transactions', authenticateToken, requireVendor, async (req, res) => {
     try {
+      if (!req.user) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
       const user = req.user as any;
       const db = storage as any;
       let transactions = [];
@@ -1714,7 +1528,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           transactions = result.rows || [];
           console.log(`Found ${transactions.length} payments for vendor ${user.id}`);
         } catch (queryError) {
-          console.log('Database query failed, falling back to storage methods:', queryError.message);
+          const qMessage = queryError instanceof Error ? queryError.message : String(queryError);
+          console.log('Database query failed, falling back to storage methods:', qMessage);
         }
       }
       
@@ -1789,7 +1604,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           payouts = result.rows || [];
           console.log(`Found ${payouts.length} payouts for vendor ${user.id}`);
         } catch (queryError) {
-          console.log('Database query failed, falling back to storage methods:', queryError.message);
+          const qMessage = queryError instanceof Error ? queryError.message : String(queryError);
+          console.log('Database query failed, falling back to storage methods:', qMessage);
         }
       }
       
@@ -1813,9 +1629,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = req.user as any;
       const db = storage as any;
-      let stats = {};
+      let stats: any = {};
       
-      // Try to get enhanced stats from Paystack sync tables
+      // Try to get enhanced stats from database
       if (db.query) {
         try {
           const result = await db.query(`
@@ -1879,11 +1695,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           console.log(`Enhanced stats for vendor ${user.id}:`, stats);
         } catch (queryError) {
-          console.log('Paystack stats tables not available, falling back to regular stats');
+          console.log('Database query failed, falling back to regular stats');
         }
       }
       
-      // If no Paystack stats found, fall back to regular stats
+      // If no enhanced stats found, fall back to regular stats
       if (Object.keys(stats).length === 0) {
         console.log('Falling back to regular stats calculation');
         const payments = await storage.getPaymentsByVendor(user.id);
@@ -1927,6 +1743,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/vendors/:vendorId/payments', authenticateToken, async (req, res) => {
     try {
       const { vendorId } = req.params;
+      if (!req.user) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
       const user = req.user;
       
       // Check if user can access this vendor's payments
@@ -1949,6 +1768,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/vendors/:vendorId/payouts', authenticateToken, async (req, res) => {
     try {
       const { vendorId } = req.params;
+      if (!req.user) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
       const user = req.user;
       
       // Check if user can access this vendor's payouts
@@ -1963,35 +1785,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ 
         success: false, 
         message: 'Failed to fetch vendor payouts' 
-      });
-    }
-  });
-
-  // Paystack balance and settlements
-  app.get('/api/paystack/balance', requireAdmin, async (req, res) => {
-    try {
-      const { paystackSync } = await import('./paystack-sync');
-      const balance = await paystackSync.fetchBalance();
-      res.json(balance);
-    } catch (error) {
-      console.error('Error fetching Paystack balance:', error);
-      res.status(500).json({ 
-        success: false, 
-        message: 'Failed to fetch balance' 
-      });
-    }
-  });
-
-  app.get('/api/paystack/settlements', requireAdmin, async (req, res) => {
-    try {
-      const { paystackSync } = await import('./paystack-sync');
-      const settlements = await paystackSync.fetchSettlements();
-      res.json(settlements);
-    } catch (error) {
-      console.error('Error fetching Paystack settlements:', error);
-      res.status(500).json({ 
-        success: false, 
-        message: 'Failed to fetch settlements' 
       });
     }
   });
@@ -2055,8 +1848,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allProducts = await storage.getProducts();
       const allOrders = await storage.getOrders();
       // Get real counts from database - handle empty tables gracefully
-      let allMentors = [];
-      let allPrograms = [];
+      let allMentors: any[] = [];
+      let allPrograms: any[] = [];
       
       try {
         allMentors = await storage.getMentors();
@@ -2089,8 +1882,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(stats);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Platform stats error:', error);
-      res.status(500).json({ message: 'Failed to fetch platform statistics' });
+      res.status(500).json({ message: 'Failed to fetch platform statistics', error: message });
     }
   });
 
@@ -2128,8 +1922,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json(stats);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching admin stats:', error);
-      res.status(500).json({ message: 'Failed to fetch admin stats' });
+      res.status(500).json({ message: 'Failed to fetch admin stats', error: message });
     }
   });
 
@@ -2161,12 +1956,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json(businessesData);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching businesses:', error);
-      res.status(500).json({ message: 'Failed to fetch businesses' });
+      res.status(500).json({ message: 'Failed to fetch businesses', error: message });
     }
   });
 
-  app.get('/api/admin/users', authenticateAdminToken, async (req, res) => {
+  // Admin: Pending vendors (businesses not yet approved)
+  app.get('/api/admin/vendors/pending', authenticateAdminToken, async (_req: Request, res: Response) => {
+    try {
+      const allUsers = await storage.getUsers();
+      const pending = allUsers.filter(u => u.role === 'vendor' && !u.is_approved);
+      res.json(pending.map(u => ({ ...u, password: undefined })));
+    } catch (error) {
+      console.error('Error fetching pending vendors:', error);
+      res.status(500).json({ message: 'Failed to fetch pending vendors' });
+    }
+  });
+
+  // Admin: Approve/Reject a business (toggle is_approved)
+  app.patch('/api/admin/businesses/:id/status', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      const { approved } = req.body as { approved: boolean };
+      const updated = await storage.updateUser(req.params.id, { is_approved: !!approved });
+      res.json({ ...updated, password: undefined });
+    } catch (error) {
+      console.error('Error updating business status:', error);
+      res.status(500).json({ message: 'Failed to update business status' });
+    }
+  });
+
+  // Admin: Approve convenience endpoint
+  app.post('/api/admin/businesses/:id/approve', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      const updated = await storage.updateUser(req.params.id, { is_approved: true });
+      res.json({ ...updated, password: undefined });
+    } catch (error) {
+      console.error('Error approving business:', error);
+      res.status(500).json({ message: 'Failed to approve business' });
+    }
+  });
+
+  // Admin: Delete business (delete vendor user)
+  app.delete('/api/admin/businesses/:id', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteUser(req.params.id);
+      res.json({ message: 'Business deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting business:', error);
+      res.status(500).json({ message: 'Failed to delete business' });
+    }
+  });
+
+  app.get('/api/admin/users', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
       const allUsers = await storage.getUsers();
       const usersData = allUsers.map(user => ({
@@ -2177,966 +2019,700 @@ export async function registerRoutes(app: Express): Promise<Server> {
         is_approved: user.is_approved || false,
         created_at: user.created_at
       }));
-      
       res.json(usersData);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching users:', error);
-      res.status(500).json({ message: 'Failed to fetch users' });
+      res.status(500).json({ message: 'Failed to fetch users', error: message });
     }
   });
 
-  // Admin endpoint to approve/reject vendors
-  app.patch('/api/admin/vendors/:vendorId/status', authenticateToken, requireAdmin, async (req, res) => {
+  // Admin: Update user (e.g., approve/deactivate, role change)
+  app.patch('/api/admin/users/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { vendorId } = req.params;
-      const { approved } = req.body;
-      
-      if (typeof approved !== 'boolean') {
-        return res.status(400).json({ message: 'Invalid approval status' });
-      }
-      
-      const updatedUser = await storage.updateUser(vendorId, { is_approved: approved });
-      res.json(updatedUser);
+      const updates = req.body || {};
+      const updated = await storage.updateUser(req.params.id, updates);
+      const sanitized = { ...updated, password: undefined } as any;
+      res.json(sanitized);
     } catch (error) {
-      console.error('Error updating vendor status:', error);
-      res.status(500).json({ message: 'Failed to update vendor status' });
-    }
-  });
-
-  // Admin CRUD endpoints for user management
-  app.patch('/api/admin/users/:userId', authenticateAdminToken, async (req, res) => {
-    try {
-      const { userId } = req.params;
-      const updates = req.body;
-      
-      const updatedUser = await storage.updateUser(userId, updates);
-      res.json(updatedUser);
-    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error updating user:', error);
-      res.status(500).json({ message: 'Failed to update user' });
+      res.status(500).json({ message: 'Failed to update user', error: message });
     }
   });
 
-  app.delete('/api/admin/users/:userId', authenticateAdminToken, async (req, res) => {
+  // Admin: Delete user
+  app.delete('/api/admin/users/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
-      
-      await storage.deleteUser(userId);
+      await storage.deleteUser(req.params.id);
       res.json({ message: 'User deleted successfully' });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error deleting user:', error);
-      res.status(500).json({ message: 'Failed to delete user' });
+      res.status(500).json({ message: 'Failed to delete user', error: message });
     }
   });
 
-  // Admin CRUD endpoints for business management
-  app.patch('/api/admin/businesses/:businessId/status', authenticateAdminToken, async (req, res) => {
+  // Admin: Manage admin accounts
+  app.get('/api/admin/admin-users', authenticateAdminToken, async (_req: Request, res: Response) => {
     try {
-      const { businessId } = req.params;
-      const { approved } = req.body;
-      
-      if (typeof approved !== 'boolean') {
-        return res.status(400).json({ message: 'Invalid approval status' });
+      const list = await storage.getAdminUsers();
+      res.json(list.map(a => ({ ...a, password: undefined })));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching admin users:', error);
+      res.status(500).json({ message: 'Failed to fetch admin users', error: message });
+    }
+  });
+
+  app.post('/api/admin/admin-users', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      const { username, password, full_name, email, is_active = true } = req.body || {};
+      if (!username || !password || !full_name || !email) {
+        return res.status(400).json({ message: 'username, password, full_name and email are required' });
       }
-      
-      const updatedUser = await storage.updateUser(businessId, { is_approved: approved });
-      res.json(updatedUser);
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(String(email))) {
+        return res.status(400).json({ message: 'Invalid email format' });
+      }
+      const existing = await storage.getAdminUserByUsername(String(username));
+      if (existing) {
+        return res.status(409).json({ message: 'Username already exists' });
+      }
+      const created = await storage.createAdminUser({ username, password, full_name, email, is_active });
+      res.status(201).json({ ...created, password: undefined });
     } catch (error) {
-      console.error('Error updating business status:', error);
-      res.status(500).json({ message: 'Failed to update business status' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error creating admin user:', error);
+      res.status(500).json({ message: 'Failed to create admin user', error: message });
     }
   });
 
-  app.delete('/api/admin/businesses/:businessId', authenticateAdminToken, async (req, res) => {
+  app.patch('/api/admin/admin-users/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { businessId } = req.params;
-      
-      // Delete business (which is a vendor user)
-      await storage.deleteUser(businessId);
-      res.json({ message: 'Business deleted successfully' });
+      const { id } = req.params;
+      const updates: any = {};
+      if (typeof req.body?.password === 'string' && req.body.password.length > 0) updates.password = req.body.password;
+      if (typeof req.body?.is_active === 'boolean') updates.is_active = req.body.is_active;
+      if (typeof req.body?.full_name === 'string' && req.body.full_name.trim() !== '') updates.full_name = req.body.full_name.trim();
+      if (typeof req.body?.email === 'string' && req.body.email.trim() !== '') {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(req.body.email)) return res.status(400).json({ message: 'Invalid email format' });
+        updates.email = req.body.email.trim();
+      }
+      if (Object.keys(updates).length === 0) return res.status(400).json({ message: 'No valid fields to update' });
+      const updated = await storage.updateAdminUser(id, updates);
+      if (!updated) return res.status(404).json({ message: 'Admin user not found' });
+      res.json({ ...updated, password: undefined });
     } catch (error) {
-      console.error('Error deleting business:', error);
-      res.status(500).json({ message: 'Failed to delete business' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error updating admin user:', error);
+      res.status(500).json({ message: 'Failed to update admin user', error: message });
     }
   });
 
-  // Admin endpoint to get all products
-  app.get('/api/admin/products', authenticateToken, requireAdmin, async (req, res) => {
+  app.delete('/api/admin/admin-users/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const allProducts = await storage.getProducts();
-      res.json(allProducts);
+      const { id } = req.params;
+      if (req.adminUser && req.adminUser.id === id) {
+        return res.status(400).json({ message: 'You cannot delete the admin account you are currently using.' });
+      }
+      const updated = await storage.updateAdminUser(id, { is_active: false });
+      if (!updated) return res.status(404).json({ message: 'Admin user not found' });
+      res.json({ message: 'Admin user deactivated' });
     } catch (error) {
-      console.error('Error fetching all products:', error);
-      res.status(500).json({ message: 'Failed to fetch products' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting admin user:', error);
+      res.status(500).json({ message: 'Failed to delete admin user', error: message });
     }
   });
 
-  // Admin endpoint to manage product visibility
-  app.patch('/api/admin/products/:productId/status', authenticateToken, requireAdmin, async (req, res) => {
+  // Admin: Mentors CRUD
+  app.get('/api/admin/mentors', authenticateAdminToken, async (_req: Request, res: Response) => {
     try {
-      const { productId } = req.params;
-      const { status } = req.body;
-      
-      const updatedProduct = await storage.updateProduct(productId, { status });
-      res.json(updatedProduct);
+      const list = await storage.getMentors();
+      res.json(list);
     } catch (error) {
-      console.error('Error updating product status:', error);
-      res.status(500).json({ message: 'Failed to update product status' });
-    }
-  });
-
-  // Admin endpoints for mentors with full CRUD
-  app.get('/api/admin/mentors', authenticateAdminToken, async (req, res) => {
-    try {
-      const mentors = await storage.getMentors();
-      res.json(mentors);
-    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching mentors:', error);
-      res.status(500).json({ message: 'Failed to fetch mentors' });
+      res.status(500).json({ message: 'Failed to fetch mentors', error: message });
     }
   });
 
-  app.post('/api/admin/mentors', authenticateAdminToken, async (req, res) => {
+  app.post('/api/admin/mentors', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const mentorData = { ...req.body };
-      
-      // Convert numeric fields
-      if (mentorData.years_experience && typeof mentorData.years_experience === 'string') {
-        mentorData.years_experience = parseInt(mentorData.years_experience);
+      const body = { ...req.body };
+      if (typeof body.years_experience === 'string') {
+        body.years_experience = parseInt(body.years_experience);
       }
-      if (mentorData.consultation_fee && typeof mentorData.consultation_fee === 'string') {
-        mentorData.consultation_fee = parseFloat(mentorData.consultation_fee);
-      }
-      
-      const mentor = await storage.createMentor(mentorData);
-      res.json(mentor);
+      const data = insertMentorSchema.parse(body);
+      const created = await storage.createMentor(data);
+      res.json(created);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error creating mentor:', error);
-      res.status(500).json({ message: 'Failed to create mentor' });
+      res.status(400).json({ message: 'Failed to create mentor', error: message });
     }
   });
 
-  app.get('/api/admin/mentors/:id', authenticateAdminToken, async (req, res) => {
+  app.put('/api/admin/mentors/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const mentor = await storage.getMentor(id);
-      if (!mentor) {
-        return res.status(404).json({ message: 'Mentor not found' });
+      const body = { ...req.body };
+      if (typeof body.years_experience === 'string') {
+        body.years_experience = parseInt(body.years_experience);
       }
-      res.json(mentor);
+      const updated = await storage.updateMentor(req.params.id, body);
+      res.json(updated);
     } catch (error) {
-      console.error('Error fetching mentor:', error);
-      res.status(500).json({ message: 'Failed to fetch mentor' });
-    }
-  });
-
-  app.put('/api/admin/mentors/:id', authenticateAdminToken, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const updates = { ...req.body };
-      
-      // Convert numeric fields
-      if (updates.years_experience && typeof updates.years_experience === 'string') {
-        updates.years_experience = parseInt(updates.years_experience);
-      }
-      if (updates.consultation_fee && typeof updates.consultation_fee === 'string') {
-        updates.consultation_fee = parseFloat(updates.consultation_fee);
-      }
-      
-      const mentor = await storage.updateMentor(id, updates);
-      res.json(mentor);
-    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error updating mentor:', error);
-      res.status(500).json({ message: 'Failed to update mentor' });
+      res.status(400).json({ message: 'Failed to update mentor', error: message });
     }
   });
 
-  app.delete('/api/admin/mentors/:id', authenticateAdminToken, async (req, res) => {
+  app.delete('/api/admin/mentors/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      await storage.deleteMentor(id);
+      await storage.deleteMentor(req.params.id);
       res.json({ message: 'Mentor deleted successfully' });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error deleting mentor:', error);
-      res.status(500).json({ message: 'Failed to delete mentor' });
+      res.status(400).json({ message: 'Failed to delete mentor', error: message });
     }
   });
 
-  // Admin endpoints for programs with full CRUD
-  app.get('/api/admin/programs', authenticateAdminToken, async (req, res) => {
+  // Admin: Programs CRUD
+  app.get('/api/admin/programs', authenticateAdminToken, async (_req: Request, res: Response) => {
     try {
-      const programs = await storage.getPrograms();
-      res.json(programs);
+      const list = await storage.getPrograms();
+      res.json(list);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching programs:', error);
-      res.status(500).json({ message: 'Failed to fetch programs' });
+      res.status(500).json({ message: 'Failed to fetch programs', error: message });
     }
   });
 
-  app.post('/api/admin/programs', authenticateAdminToken, async (req, res) => {
+  app.post('/api/admin/programs', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const programData = { ...req.body };
-      
-      // Convert date strings to Date objects for timestamp fields
-      if (programData.start_date && typeof programData.start_date === 'string') {
-        programData.start_date = new Date(programData.start_date);
-      }
-      if (programData.end_date && typeof programData.end_date === 'string') {
-        programData.end_date = new Date(programData.end_date);
-      }
-      
-      // Convert numeric fields
-      if (programData.max_participants && typeof programData.max_participants === 'string') {
-        programData.max_participants = parseInt(programData.max_participants);
-      }
-      if (programData.program_fee && typeof programData.program_fee === 'string') {
-        programData.program_fee = parseFloat(programData.program_fee);
-      }
-      
-      // Handle empty string mentor_id (convert to null for UUID validation)
-      if (programData.mentor_id === '') {
-        programData.mentor_id = null;
-      }
-      
-      const program = await storage.createProgram(programData);
-      res.json(program);
+      const body = { ...req.body };
+      if (typeof body.max_participants === 'string') body.max_participants = parseInt(body.max_participants);
+      if (typeof body.start_date === 'string') body.start_date = new Date(body.start_date);
+      if (typeof body.end_date === 'string') body.end_date = new Date(body.end_date);
+      if (body.mentor_id === '') body.mentor_id = null;
+      const data = insertProgramSchema.parse(body);
+      const created = await storage.createProgram(data);
+      res.json(created);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error creating program:', error);
-      res.status(500).json({ message: 'Failed to create program' });
+      res.status(400).json({ message: 'Failed to create program', error: message });
     }
   });
 
-  app.get('/api/admin/programs/:id', authenticateAdminToken, async (req, res) => {
+  app.put('/api/admin/programs/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const program = await storage.getProgram(id);
-      if (!program) {
-        return res.status(404).json({ message: 'Program not found' });
-      }
-      res.json(program);
+      const body = { ...req.body };
+      if (typeof body.max_participants === 'string') body.max_participants = parseInt(body.max_participants);
+      if (typeof body.start_date === 'string') body.start_date = new Date(body.start_date);
+      if (typeof body.end_date === 'string') body.end_date = new Date(body.end_date);
+      if (body.mentor_id === '') body.mentor_id = null;
+      const updated = await storage.updateProgram(req.params.id, body);
+      res.json(updated);
     } catch (error) {
-      console.error('Error fetching program:', error);
-      res.status(500).json({ message: 'Failed to fetch program' });
-    }
-  });
-
-  app.put('/api/admin/programs/:id', authenticateAdminToken, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const updates = { ...req.body };
-      
-      // Convert date strings to Date objects for timestamp fields
-      if (updates.start_date && typeof updates.start_date === 'string') {
-        updates.start_date = new Date(updates.start_date);
-      }
-      if (updates.end_date && typeof updates.end_date === 'string') {
-        updates.end_date = new Date(updates.end_date);
-      }
-      
-      // Handle empty string mentor_id (convert to null for UUID validation)
-      if (updates.mentor_id === '') {
-        updates.mentor_id = null;
-      }
-      
-      // Convert numeric fields
-      if (updates.max_participants && typeof updates.max_participants === 'string') {
-        updates.max_participants = parseInt(updates.max_participants);
-      }
-      if (updates.program_fee && typeof updates.program_fee === 'string') {
-        updates.program_fee = parseFloat(updates.program_fee);
-      }
-      
-      const program = await storage.updateProgram(id, updates);
-      res.json(program);
-    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error updating program:', error);
-      res.status(500).json({ message: 'Failed to update program' });
+      res.status(400).json({ message: 'Failed to update program', error: message });
     }
   });
 
-  app.delete('/api/admin/programs/:id', authenticateAdminToken, async (req, res) => {
+  app.delete('/api/admin/programs/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      await storage.deleteProgram(id);
+      await storage.deleteProgram(req.params.id);
       res.json({ message: 'Program deleted successfully' });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error deleting program:', error);
-      res.status(500).json({ message: 'Failed to delete program' });
+      res.status(400).json({ message: 'Failed to delete program', error: message });
     }
   });
 
-  // Public resource endpoints for students
-  app.get('/api/resources', async (req, res) => {
+  // Admin: Quick Sales CRUD
+  app.get('/api/admin/quick-sales', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const resources = await storage.getResources();
-      // Only return published resources for public access
-      const publishedResources = resources.filter(r => r.status === 'published');
-      res.json(publishedResources);
+      const { status } = req.query;
+      const sales = await storage.getQuickSales(status as any);
+      const enriched = await Promise.all(sales.map(async (sale: any) => {
+        const products = await storage.getQuickSaleProducts(sale.id);
+        const bids = await storage.getQuickSaleBids(sale.id);
+        const highest = await storage.getHighestBid(sale.id);
+        return { ...sale, products_count: products.length, bids_count: bids.length, highest_bid: highest?.bid_amount ?? null };
+      }));
+      res.json(enriched);
     } catch (error) {
-      console.error('Error fetching resources:', error);
-      res.status(500).json({ message: 'Failed to fetch resources' });
+      console.error('Error fetching admin quick sales:', error);
+      res.status(500).json({ message: 'Failed to fetch quick sales' });
     }
   });
 
-  app.get('/api/resources/:id', async (req, res) => {
+  app.get('/api/admin/quick-sales/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const resource = await storage.getResource(id);
-      if (!resource || resource.status !== 'published') {
-        return res.status(404).json({ message: 'Resource not found' });
-      }
-      
-      res.json(resource);
+      const sale = await storage.getQuickSale(req.params.id);
+      if (!sale) return res.status(404).json({ message: 'Quick sale not found' });
+      const products = await storage.getQuickSaleProducts(req.params.id);
+      const bids = await storage.getQuickSaleBids(req.params.id);
+      const highest_bid = await storage.getHighestBid(req.params.id);
+      res.json({ ...sale, products, bids, highest_bid });
     } catch (error) {
-      console.error('Error fetching resource:', error);
-      res.status(500).json({ message: 'Failed to fetch resource' });
+      console.error('Error fetching admin quick sale:', error);
+      res.status(500).json({ message: 'Failed to fetch quick sale' });
     }
   });
 
-  // Track resource view
-  app.post('/api/resources/:id/view', async (req, res) => {
+  app.post('/api/admin/quick-sales', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const resource = await storage.getResource(id);
-      if (!resource || resource.status !== 'published') {
-        return res.status(404).json({ message: 'Resource not found' });
+      const { products = [], ...saleBody } = req.body || {};
+      // Coerce dates and numbers for schema validation
+      if (typeof saleBody.reserve_price === 'string' && saleBody.reserve_price !== '') {
+        saleBody.reserve_price = saleBody.reserve_price;
       }
-      
-      await storage.incrementResourceViews(id);
-      res.json({ message: 'View tracked successfully' });
+      if (typeof saleBody.ends_at === 'string') saleBody.ends_at = saleBody.ends_at;
+      if (typeof saleBody.starts_at === 'string') saleBody.starts_at = saleBody.starts_at;
+      const saleData = insertQuickSaleSchema.parse(saleBody);
+      const productRows = Array.isArray(products) ? products.map((p: any) => {
+        const row = insertQuickSaleProductSchema.partial({ images: true }).parse({
+          title: p.title,
+          description: p.description,
+          condition: p.condition || 'new',
+          images: p.images || [],
+        } as any);
+        return row;
+      }) : [];
+      const created = await storage.createQuickSale(saleData as any, productRows as any);
+      res.status(201).json(created);
     } catch (error) {
-      console.error('Error tracking resource view:', error);
-      res.status(500).json({ message: 'Failed to track view' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error creating admin quick sale:', error);
+      res.status(400).json({ message: 'Failed to create quick sale', error: message });
     }
   });
 
-  // Track resource download
-  app.post('/api/resources/:id/download', async (req, res) => {
+  app.put('/api/admin/quick-sales/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const { fileUrl } = req.body;
-      const resource = await storage.getResource(id);
-      if (!resource || resource.status !== 'published') {
-        return res.status(404).json({ message: 'Resource not found' });
+      const body = { ...req.body };
+      if (typeof body.reserve_price === 'string' && body.reserve_price !== '') {
+        body.reserve_price = body.reserve_price;
       }
-      
-      await storage.incrementResourceDownloads(id);
-      res.json({ message: 'Download tracked successfully' });
+      if (typeof body.ends_at === 'string') body.ends_at = body.ends_at;
+      if (typeof body.starts_at === 'string') body.starts_at = body.starts_at;
+      // Validate status; only allow specific statuses
+      if (typeof body.status !== 'undefined') {
+        const allowed = new Set(['active', 'ended', 'cancelled']);
+        if (!body.status || !allowed.has(String(body.status))) {
+          delete (body as any).status;
+        }
+      }
+      const updated = await storage.updateQuickSale(req.params.id, body);
+      res.json(updated);
     } catch (error) {
-      console.error('Error tracking resource download:', error);
-      res.status(500).json({ message: 'Failed to track download' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error updating admin quick sale:', error);
+      res.status(400).json({ message: 'Failed to update quick sale', error: message });
     }
   });
 
-
-
-  // Admin endpoints for resources with full CRUD
-  app.get('/api/admin/resources', authenticateAdminToken, async (req, res) => {
+  app.delete('/api/admin/quick-sales/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const resources = await storage.getResources();
-      res.json(resources);
+      await storage.deleteQuickSale(req.params.id);
+      res.json({ message: 'Quick sale deleted successfully' });
     } catch (error) {
-      console.error('Error fetching resources:', error);
-      res.status(500).json({ message: 'Failed to fetch resources' });
+      console.error('Error deleting admin quick sale:', error);
+      res.status(400).json({ message: 'Failed to delete quick sale' });
     }
   });
 
-  // Resource file upload endpoint
-  app.post('/api/admin/resources/upload', authenticateAdminToken, resourceUpload.array('files', 5), async (req, res) => {
+  app.post('/api/admin/quick-sales/:id/finalize', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
-        return res.status(400).json({ message: 'No files uploaded' });
+      const sale = await storage.getQuickSale(req.params.id);
+      if (!sale) return res.status(404).json({ message: 'Quick sale not found' });
+      const finalized = await storage.finalizeQuickSale(req.params.id);
+      res.json(finalized);
+    } catch (error) {
+      console.error('Error finalizing admin quick sale:', error);
+      res.status(500).json({ message: 'Failed to finalize quick sale' });
+    }
+  });
+
+  // Admin: Resources upload (files)
+  app.post('/api/admin/resources/upload', authenticateAdminToken, resourceUpload.any(), async (req: Request, res: Response) => {
+    try {
+      const files = (req.files as Express.Multer.File[]) || [];
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_KEY;
+      const uploaded: Array<{ name: string; url: string; size: number; type: string }> = [];
+
+      for (const file of files) {
+        let fileUrl = '';
+        if (supabaseUrl && supabaseKey) {
+          try {
+            const supabase = createClient(supabaseUrl, supabaseKey);
+            const filename = `resources/${Date.now()}-${file.originalname}`;
+            const { data, error } = await supabase.storage
+              .from('resource-files')
+              .upload(filename, file.buffer, { contentType: file.mimetype, upsert: false });
+            if (!error && data) {
+              const { data: { publicUrl } } = supabase.storage.from('resource-files').getPublicUrl(data.path);
+              fileUrl = publicUrl;
+            }
+          } catch (err) {
+            console.warn('Supabase upload failed for resource, using local storage fallback', err);
+          }
+        }
+        if (!fileUrl) {
+          const filename = `${Date.now()}-${file.originalname}`;
+          const filepath = path.join(uploadDir, filename);
+          fs.writeFileSync(filepath, file.buffer);
+          fileUrl = `/uploads/${filename}`;
+        }
+        uploaded.push({ name: file.originalname, url: fileUrl, size: file.size, type: file.mimetype });
       }
 
-      const uploadedFiles = [];
-      
-      for (const file of req.files) {
-        // Save file to local storage
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const fileName = `resource-${uniqueSuffix}${path.extname(file.originalname)}`;
-        const filePath = path.join(uploadDir, fileName);
-        
-        fs.writeFileSync(filePath, file.buffer);
-        
-        const fileUrl = `/uploads/${fileName}`;
-        const fileSize = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-        
-        uploadedFiles.push({
-          name: file.originalname,
-          url: fileUrl,
-          type: file.mimetype,
-          size: fileSize
-        });
-      }
-
-      res.json({ files: uploadedFiles });
+      res.json({ files: uploaded });
     } catch (error) {
       console.error('Error uploading resource files:', error);
       res.status(500).json({ message: 'Failed to upload files' });
     }
   });
 
-  app.post('/api/admin/resources', authenticateAdminToken, async (req, res) => {
+  // Admin: Resources CRUD
+  app.get('/api/admin/resources', authenticateAdminToken, async (_req: Request, res: Response) => {
     try {
-      const resourceData = { ...req.body };
-      
-      // Convert numeric fields if they're strings
-      if (resourceData.views && typeof resourceData.views === 'string') {
-        resourceData.views = parseInt(resourceData.views) || 0;
-      }
-      if (resourceData.downloads && typeof resourceData.downloads === 'string') {
-        resourceData.downloads = parseInt(resourceData.downloads) || 0;
-      }
-      
-      // Parse tags if it's a string
-      if (resourceData.tags && typeof resourceData.tags === 'string') {
-        resourceData.tags = resourceData.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
-      }
-      
-      // Set default values for new fields
-      resourceData.views = resourceData.views || 0;
-      resourceData.downloads = resourceData.downloads || 0;
-      resourceData.files = resourceData.files || [];
-      resourceData.external_links = resourceData.external_links || [];
-      
-      const resource = await storage.createResource(resourceData);
-      res.json(resource);
+      const all = await storage.getResources();
+      res.json(all);
     } catch (error) {
-      console.error('Error creating resource:', error);
-      res.status(500).json({ message: 'Failed to create resource' });
+      console.error('Error fetching admin resources:', error);
+      res.status(500).json({ message: 'Failed to fetch resources' });
     }
   });
 
-  app.get('/api/admin/resources/:id', authenticateAdminToken, async (req, res) => {
+  app.get('/api/admin/resources/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const resource = await storage.getResource(id);
-      if (!resource) {
-        return res.status(404).json({ message: 'Resource not found' });
-      }
-      res.json(resource);
+      const item = await storage.getResource(req.params.id);
+      if (!item) return res.status(404).json({ message: 'Resource not found' });
+      res.json(item);
     } catch (error) {
       console.error('Error fetching resource:', error);
       res.status(500).json({ message: 'Failed to fetch resource' });
     }
   });
 
-  app.put('/api/admin/resources/:id', authenticateAdminToken, async (req, res) => {
+  app.post('/api/admin/resources', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const updates = req.body;
-      const resource = await storage.updateResource(id, updates);
-      res.json(resource);
-    } catch (error) {
-      console.error('Error updating resource:', error);
-      res.status(500).json({ message: 'Failed to update resource' });
+      const data = insertResourceSchema.parse(req.body);
+      const created = await storage.createResource(data as any);
+      res.status(201).json(created);
+    } catch (error: any) {
+      console.error('Error creating resource:', error);
+      res.status(400).json({ message: 'Failed to create resource', error: error.message || String(error) });
     }
   });
 
-  app.delete('/api/admin/resources/:id', authenticateAdminToken, async (req, res) => {
+  app.put('/api/admin/resources/:id', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      await storage.deleteResource(id);
+      const updated = await storage.updateResource(req.params.id, req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error('Error updating resource:', error);
+      res.status(400).json({ message: 'Failed to update resource' });
+    }
+  });
+
+  app.delete('/api/admin/resources/:id', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteResource(req.params.id);
       res.json({ message: 'Resource deleted successfully' });
     } catch (error) {
       console.error('Error deleting resource:', error);
-      res.status(500).json({ message: 'Failed to delete resource' });
+      res.status(400).json({ message: 'Failed to delete resource' });
     }
   });
 
-  // Admin authentication routes
-  app.post('/api/admin/login', async (req, res) => {
+  // Public: Resources
+  app.get('/api/resources', async (_req: Request, res: Response) => {
     try {
-      const { username, password } = req.body;
-      
-      if (!username || !password) {
-        return res.status(400).json({ 
-          error: 'Username and password are required' 
-        });
-      }
-
-      // Find admin user by username
-      const adminUser = await storage.getAdminUserByUsername(username);
-      
-      if (!adminUser) {
-        return res.status(401).json({ 
-          error: 'Invalid credentials' 
-        });
-      }
-
-      // Check if admin is active
-      if (!adminUser.is_active) {
-        return res.status(401).json({ 
-          error: 'Admin account is inactive' 
-        });
-      }
-
-      // Compare plain text password (as requested)
-      if (adminUser.password !== password) {
-        return res.status(401).json({ 
-          error: 'Invalid credentials' 
-        });
-      }
-
-      // Generate JWT token for admin session
-      const token = jwt.sign(
-        { 
-          id: adminUser.id, 
-          username: adminUser.username,
-          type: 'admin'
-        }, 
-        JWT_SECRET, 
-        { expiresIn: '24h' }
-      );
-
-      res.json({
-        message: 'Login successful',
-        token,
-        user: {
-          id: adminUser.id,
-          username: adminUser.username,
-          full_name: adminUser.full_name,
-          email: adminUser.email,
-          is_active: adminUser.is_active
-        }
-      });
+      const all = await storage.getResources();
+      const published = all.filter((r: any) => r.status === 'published');
+      res.json(published);
     } catch (error) {
-      console.error('Admin login error:', error);
-      res.status(500).json({ 
-        error: 'Internal server error' 
-      });
+      console.error('Error fetching resources:', error);
+      res.status(500).json({ message: 'Failed to fetch resources' });
     }
   });
 
-
-
-  // Admin profile route
-  app.get('/api/admin/profile', authenticateAdminToken, async (req, res) => {
+  app.get('/api/resources/:id', async (req: Request, res: Response) => {
     try {
-      const adminUser = req.adminUser;
-      res.json({
-        id: adminUser.id,
-        username: adminUser.username,
-        full_name: adminUser.full_name,
-        email: adminUser.email,
-        is_active: adminUser.is_active,
-        created_at: adminUser.created_at
-      });
+      const item = await storage.getResource(req.params.id);
+      if (!item || item.status !== 'published') return res.status(404).json({ message: 'Resource not found' });
+      res.json(item);
     } catch (error) {
-      console.error('Error fetching admin profile:', error);
-      res.status(500).json({ message: 'Failed to fetch admin profile' });
+      console.error('Error fetching resource:', error);
+      res.status(500).json({ message: 'Failed to fetch resource' });
     }
   });
 
-  // Update admin profile
-  app.put('/api/admin/profile', authenticateAdminToken, async (req, res) => {
+  app.post('/api/resources/:id/view', async (req: Request, res: Response) => {
     try {
-      if (!req.adminUser) {
-        return res.status(401).json({ message: 'Admin authentication required' });
-      }
-
-      const { username, email, full_name, phone, bio } = req.body;
-      
-      const updatedProfile = await storage.updateAdminUser(req.adminUser.id, {
-        username,
-        email,
-        full_name,
-        phone,
-        bio
-      });
-
-      res.json({
-        id: updatedProfile.id,
-        username: updatedProfile.username,
-        full_name: updatedProfile.full_name,
-        email: updatedProfile.email,
-        phone: updatedProfile.phone,
-        bio: updatedProfile.bio,
-        is_active: updatedProfile.is_active,
-        created_at: updatedProfile.created_at
-      });
+      await storage.incrementResourceViews(req.params.id);
+      res.json({ ok: true });
     } catch (error) {
-      console.error('Error updating admin profile:', error);
-      res.status(500).json({ message: 'Failed to update admin profile' });
+      console.error('Error incrementing views:', error);
+      res.status(500).json({ message: 'Failed to track view' });
     }
   });
 
-  // Admin logout route
-  app.post('/api/admin/logout', authenticateAdminToken, async (req, res) => {
+  app.post('/api/resources/:id/download', async (req: Request, res: Response) => {
     try {
-      // Since we're using stateless JWT, logout is handled on client side
-      res.json({ message: 'Logged out successfully' });
+      await storage.incrementResourceDownloads(req.params.id);
+      res.json({ ok: true });
     } catch (error) {
-      console.error('Admin logout error:', error);
-      res.status(500).json({ message: 'Logout error' });
+      console.error('Error incrementing downloads:', error);
+      res.status(500).json({ message: 'Failed to track download' });
     }
   });
 
-  // ================================
-  // COMMUNITY DISCUSSION ROUTES
-  // ================================
-  
-  // Get all discussions
-  app.get('/api/discussions', async (req, res) => {
+  // Community Discussions (Public)
+  app.get('/api/discussions', async (req: Request, res: Response) => {
     try {
-      const { category, search } = req.query;
-      let discussions;
-      
-      if (category && category !== 'all') {
-        discussions = await storage.getDiscussionsByCategory(category as string);
-      } else {
-        discussions = await storage.getDiscussions();
-      }
-      
-      // Filter by search term if provided
-      if (search) {
-        const searchTerm = (search as string).toLowerCase();
-        discussions = discussions.filter(d => 
-          d.title.toLowerCase().includes(searchTerm) ||
-          d.content.toLowerCase().includes(searchTerm)
-        );
-      }
-      
-      res.json(discussions);
+      const { category, search } = req.query as { category?: string; search?: string };
+      const list = category && category !== 'all'
+        ? await storage.getDiscussionsByCategory(String(category))
+        : await storage.getDiscussions();
+      // Simple search filtering on title/content
+      const filtered = search
+        ? list.filter((d: any) =>
+            (d.title || '').toLowerCase().includes(String(search).toLowerCase()) ||
+            (d.content || '').toLowerCase().includes(String(search).toLowerCase())
+          )
+        : list;
+      res.json(filtered);
     } catch (error) {
       console.error('Error fetching discussions:', error);
-      res.status(500).json({ message: 'Failed to get discussions' });
+      res.status(500).json({ message: 'Failed to fetch discussions' });
     }
   });
 
-  // Get single discussion
-  app.get('/api/discussions/:id', async (req, res) => {
+  app.get('/api/discussions/:id', async (req: Request, res: Response) => {
     try {
-      const discussion = await storage.getDiscussion(req.params.id);
-      if (!discussion) {
-        return res.status(404).json({ message: 'Discussion not found' });
-      }
-      
-      // Increment view count
-      await storage.incrementDiscussionViews(req.params.id);
-      
-      res.json(discussion);
+      const d = await storage.getDiscussion(req.params.id);
+      if (!d || d.status !== 'published') return res.status(404).json({ message: 'Discussion not found' });
+      res.json(d);
     } catch (error) {
       console.error('Error fetching discussion:', error);
-      res.status(500).json({ message: 'Failed to get discussion' });
+      res.status(500).json({ message: 'Failed to fetch discussion' });
     }
   });
 
-  // Create new discussion
-  app.post('/api/discussions', authenticateToken, async (req, res) => {
+  app.post('/api/discussions', async (req: Request, res: Response) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
+      // Resolve author: prefer a valid user token; otherwise fallback to an anonymous user
+      let authorId: string | null = null;
+      const authHeader = req.headers['authorization'];
+      const token = authHeader && authHeader.split(' ')[1];
+      if (token) {
+        try {
+          const decoded: any = jwt.verify(token, JWT_SECRET);
+          const user = await storage.getUser(decoded.id);
+          if (user && user.is_approved) {
+            authorId = user.id;
+          }
+        } catch {}
       }
-
-      const discussionData = {
-        ...req.body,
-        author_id: req.user.id
-      };
-
-      const discussion = await storage.createDiscussion(discussionData);
-      res.status(201).json(discussion);
-    } catch (error) {
+      if (!authorId) {
+        const anonEmail = 'anonymous@bizconnect.local';
+        let anon = await storage.getUserByEmail(anonEmail);
+        if (!anon) {
+          const hash = await bcrypt.hash('anonymous', 10);
+          anon = await storage.createUser({
+            email: anonEmail,
+            password: hash,
+            full_name: 'Anonymous',
+            role: 'user',
+            is_approved: true,
+          } as any);
+        }
+        authorId = anon!.id;
+      }
+      const payload = insertDiscussionSchema.parse({
+        title: req.body.title,
+        content: req.body.content,
+        category: req.body.category,
+        tags: Array.isArray(req.body.tags) ? req.body.tags : String(req.body.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean),
+        author_id: authorId,
+        status: 'published',
+      } as any);
+      const created = await storage.createDiscussion(payload as any);
+      res.status(201).json(created);
+    } catch (error: any) {
       console.error('Error creating discussion:', error);
-      res.status(500).json({ message: 'Failed to create discussion' });
+      res.status(400).json({ message: 'Failed to create discussion', error: error.message || String(error) });
     }
   });
 
-  // Update discussion - regular users
-  app.put('/api/discussions/:id', authenticateToken, async (req, res) => {
+  app.put('/api/discussions/:id', authenticateToken, async (req: Request, res: Response) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const discussion = await storage.getDiscussion(req.params.id);
-      if (!discussion) {
-        return res.status(404).json({ message: 'Discussion not found' });
-      }
-
-      // Only author can update their own discussion
-      if (discussion.author_id !== req.user.id) {
-        return res.status(403).json({ message: 'You can only edit your own discussions' });
-      }
-
-      const updatedDiscussion = await storage.updateDiscussion(req.params.id, req.body);
-      res.json(updatedDiscussion);
+      const user = req.user as any;
+      const existing = await storage.getDiscussion(req.params.id);
+      if (!existing) return res.status(404).json({ message: 'Discussion not found' });
+      if (user.role !== 'admin' && existing.author_id !== user.id) return res.status(403).json({ message: 'Not authorized' });
+      const updated = await storage.updateDiscussion(req.params.id, {
+        title: req.body.title,
+        content: req.body.content,
+        category: req.body.category,
+        tags: Array.isArray(req.body.tags) ? req.body.tags : undefined,
+        status: req.body.status,
+      });
+      res.json(updated);
     } catch (error) {
       console.error('Error updating discussion:', error);
-      res.status(500).json({ message: 'Failed to update discussion' });
+      res.status(400).json({ message: 'Failed to update discussion' });
     }
   });
 
-
-
-  // Delete discussion - regular users
-  app.delete('/api/discussions/:id', authenticateToken, async (req, res) => {
+  app.delete('/api/discussions/:id', authenticateToken, async (req: Request, res: Response) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const discussion = await storage.getDiscussion(req.params.id);
-      if (!discussion) {
-        return res.status(404).json({ message: 'Discussion not found' });
-      }
-
-      // Only author can delete their own discussion
-      if (discussion.author_id !== req.user.id) {
-        return res.status(403).json({ message: 'You can only delete your own discussions' });
-      }
-
+      const user = req.user as any;
+      const existing = await storage.getDiscussion(req.params.id);
+      if (!existing) return res.status(404).json({ message: 'Discussion not found' });
+      if (user.role !== 'admin' && existing.author_id !== user.id) return res.status(403).json({ message: 'Not authorized' });
       await storage.deleteDiscussion(req.params.id);
       res.json({ message: 'Discussion deleted successfully' });
     } catch (error) {
       console.error('Error deleting discussion:', error);
-      res.status(500).json({ message: 'Failed to delete discussion' });
+      res.status(400).json({ message: 'Failed to delete discussion' });
     }
   });
 
-
-
-  // Increment view count for discussion
-  app.post('/api/discussions/:id/view', async (req, res) => {
+  app.post('/api/discussions/:id/view', async (req: Request, res: Response) => {
     try {
       await storage.incrementDiscussionViews(req.params.id);
-      res.json({ success: true });
+      res.json({ ok: true });
     } catch (error) {
-      console.error('Error incrementing view count:', error);
-      res.status(500).json({ message: 'Failed to increment view count' });
+      console.error('Error tracking discussion view:', error);
+      res.status(500).json({ message: 'Failed to track view' });
     }
   });
 
-  // Get comments for a discussion
-  app.get('/api/discussions/:id/comments', async (req, res) => {
+  // Comments
+  app.get('/api/discussions/:id/comments', async (req: Request, res: Response) => {
     try {
       const comments = await storage.getCommentsByDiscussion(req.params.id);
       res.json(comments);
     } catch (error) {
       console.error('Error fetching comments:', error);
-      res.status(500).json({ message: 'Failed to get comments' });
+      res.status(500).json({ message: 'Failed to fetch comments' });
     }
   });
 
-  // Create comment for specific discussion - regular users
-  app.post('/api/discussions/:id/comments', authenticateToken, async (req, res) => {
+  app.post('/api/discussions/:id/comments', authenticateToken, async (req: Request, res: Response) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const commentData = {
-        ...req.body,
+      const user = req.user as any;
+      const payload = insertCommentSchema.parse({
         discussion_id: req.params.id,
-        author_id: req.user.id
-      };
-
-      const comment = await storage.createComment(commentData);
-      res.status(201).json(comment);
-    } catch (error) {
+        parent_comment_id: req.body.parent_comment_id || null,
+        content: req.body.content,
+        author_id: user.id,
+        status: 'published',
+      } as any);
+      const created = await storage.createComment(payload as any);
+      res.status(201).json(created);
+    } catch (error: any) {
       console.error('Error creating comment:', error);
-      res.status(500).json({ message: 'Failed to create comment' });
+      res.status(400).json({ message: 'Failed to create comment', error: error.message || String(error) });
     }
   });
 
-  // Create comment for specific discussion - admin users
-  app.post('/api/admin/discussions/:id/comments', authenticateAdminToken, async (req, res) => {
+  app.put('/api/comments/:id', authenticateToken, async (req: Request, res: Response) => {
     try {
-      if (!req.adminUser) {
-        return res.status(401).json({ message: 'Admin authentication required' });
-      }
-
-      const commentData = {
-        ...req.body,
-        discussion_id: req.params.id,
-        author_id: req.adminUser.id
-      };
-
-      const comment = await storage.createComment(commentData);
-      res.status(201).json(comment);
-    } catch (error) {
-      console.error('Error creating admin comment:', error);
-      res.status(500).json({ message: 'Failed to create comment' });
-    }
-  });
-
-  // Create comment
-  app.post('/api/comments', authenticateToken, async (req, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const commentData = {
-        ...req.body,
-        author_id: req.user.id
-      };
-
-      const comment = await storage.createComment(commentData);
-      res.status(201).json(comment);
-    } catch (error) {
-      console.error('Error creating comment:', error);
-      res.status(500).json({ message: 'Failed to create comment' });
-    }
-  });
-
-  // Update comment
-  app.put('/api/comments/:id', authenticateToken, async (req, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const comment = await storage.getComment(req.params.id);
-      if (!comment) {
-        return res.status(404).json({ message: 'Comment not found' });
-      }
-
-      // Only author or admin can update
-      if (comment.author_id !== req.user.id && req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Unauthorized' });
-      }
-
-      const updatedComment = await storage.updateComment(req.params.id, req.body);
-      res.json(updatedComment);
+      const user = req.user as any;
+      const existing = await storage.getComment(req.params.id);
+      if (!existing) return res.status(404).json({ message: 'Comment not found' });
+      if (user.role !== 'admin' && existing.author_id !== user.id) return res.status(403).json({ message: 'Not authorized' });
+      const updated = await storage.updateComment(req.params.id, { content: req.body.content, status: req.body.status });
+      res.json(updated);
     } catch (error) {
       console.error('Error updating comment:', error);
-      res.status(500).json({ message: 'Failed to update comment' });
+      res.status(400).json({ message: 'Failed to update comment' });
     }
   });
 
-  // Delete comment
-  app.delete('/api/comments/:id', authenticateToken, async (req, res) => {
+  app.delete('/api/comments/:id', authenticateToken, async (req: Request, res: Response) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const comment = await storage.getComment(req.params.id);
-      if (!comment) {
-        return res.status(404).json({ message: 'Comment not found' });
-      }
-
-      // Only author or admin can delete
-      if (comment.author_id !== req.user.id && req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Unauthorized' });
-      }
-
+      const user = req.user as any;
+      const existing = await storage.getComment(req.params.id);
+      if (!existing) return res.status(404).json({ message: 'Comment not found' });
+      if (user.role !== 'admin' && existing.author_id !== user.id) return res.status(403).json({ message: 'Not authorized' });
       await storage.deleteComment(req.params.id);
       res.json({ message: 'Comment deleted successfully' });
     } catch (error) {
       console.error('Error deleting comment:', error);
-      res.status(500).json({ message: 'Failed to delete comment' });
+      res.status(400).json({ message: 'Failed to delete comment' });
     }
   });
 
-  // Toggle like (for discussions and comments)
-  app.post('/api/likes/toggle', authenticateToken, async (req, res) => {
+  // Likes toggle
+  app.post('/api/likes/toggle', authenticateToken, async (req: Request, res: Response) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const { target_id, type } = req.body;
-      
-      if (!target_id || !type || !['discussion', 'comment'].includes(type)) {
-        return res.status(400).json({ message: 'Invalid target_id or type' });
-      }
-
-      const result = await storage.toggleLike(req.user.id, target_id, type);
+      const user = req.user as any;
+      const { targetId, type } = req.body as { targetId: string; type: 'discussion' | 'comment' };
+      if (!targetId || (type !== 'discussion' && type !== 'comment')) return res.status(400).json({ message: 'Invalid parameters' });
+      const result = await storage.toggleLike(user.id, targetId, type);
       res.json(result);
     } catch (error) {
       console.error('Error toggling like:', error);
-      res.status(500).json({ message: 'Failed to toggle like' });
+      res.status(400).json({ message: 'Failed to toggle like' });
     }
   });
 
-  // Get user's likes
-  app.get('/api/users/:id/likes', authenticateToken, async (req, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      // Users can only see their own likes unless admin
-      if (req.user.id !== req.params.id && req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Unauthorized' });
-      }
-
-      const likes = await storage.getUserLikes(req.params.id);
-      res.json(likes);
-    } catch (error) {
-      console.error('Error fetching user likes:', error);
-      res.status(500).json({ message: 'Failed to get user likes' });
-    }
-  });
-
-  // Get community stats
-  app.get('/api/community/stats', async (req, res) => {
+  // Community stats
+  app.get('/api/community/stats', async (_req: Request, res: Response) => {
     try {
       const stats = await storage.getCommunityStats();
       res.json(stats);
     } catch (error) {
       console.error('Error fetching community stats:', error);
-      res.status(500).json({ message: 'Failed to get community stats' });
+      res.status(500).json({ message: 'Failed to fetch community stats' });
     }
   });
 
-  // ================================
-  // ADMIN COMMUNITY MANAGEMENT ROUTES
-  // ================================
-
-  // Admin: Get all discussions (including hidden/deleted)
-  app.get('/api/admin/discussions', authenticateAdminToken, async (req, res) => {
+  // Admin: Discussions list/create
+  app.get('/api/admin/discussions', authenticateAdminToken, async (_req: Request, res: Response) => {
     try {
-      const discussions = await storage.getDiscussions();
-      res.json(discussions);
+      // For admin we can show all; reuse getDiscussions() which returns published, or a new method. Here we return published for now.
+      const list = await storage.getDiscussions();
+      res.json(list);
     } catch (error) {
       console.error('Error fetching admin discussions:', error);
-      res.status(500).json({ message: 'Failed to get discussions' });
+      res.status(500).json({ message: 'Failed to fetch discussions' });
     }
   });
 
-  // Admin: Create discussion
-  app.post('/api/admin/discussions', authenticateAdminToken, async (req, res) => {
+  app.post('/api/admin/discussions', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      // Get or create system admin user in users table for discussions
-      let systemAdminUser;
-      try {
-        // Try to find existing system admin user
-        const allUsers = await storage.getUsers();
-        systemAdminUser = allUsers.find(u => u.email === 'admin@ktu.edu.gh' && u.role === 'admin');
-        
-        if (!systemAdminUser) {
-          // Create system admin user for discussions
-          const newSystemAdmin = {
-            full_name: 'KTU BizConnect Admin',
-            email: 'admin@ktu.edu.gh',
-            password: 'system_admin_placeholder', // Not used for login
-            role: 'admin' as const,
-            is_approved: true,
-            store_name: 'KTU BizConnect Administration',
-            phone: '0000000000',
-            whatsapp: '0000000000'
-          };
-          
-          systemAdminUser = await storage.createUser(newSystemAdmin);
-        }
-      } catch (error) {
-        console.error('Error handling system admin user:', error);
-        throw new Error('Failed to setup system admin user');
-      }
-
-      const discussionData = {
-        ...req.body,
-        author_id: systemAdminUser.id // Use system admin user ID from users table
-      };
-
-      const discussion = await storage.createDiscussion(discussionData);
-      res.status(201).json(discussion);
-    } catch (error) {
+      // Admin can create discussions; author_id remains the admin user's id if present in storage
+      const tokenUser = (req as any).user;
+      const payload = insertDiscussionSchema.parse({
+        title: req.body.title,
+        content: req.body.content,
+        category: req.body.category,
+        tags: Array.isArray(req.body.tags) ? req.body.tags : String(req.body.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean),
+        author_id: tokenUser?.id,
+        status: 'published',
+      } as any);
+      const created = await storage.createDiscussion(payload as any);
+      res.status(201).json(created);
+    } catch (error: any) {
       console.error('Error creating admin discussion:', error);
-      res.status(500).json({ message: 'Failed to create discussion' });
+      res.status(400).json({ message: 'Failed to create discussion', error: error.message || String(error) });
     }
   });
 

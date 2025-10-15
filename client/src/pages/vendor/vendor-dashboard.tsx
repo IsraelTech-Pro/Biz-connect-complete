@@ -343,7 +343,7 @@ export default function VendorDashboard() {
                   Community Forum
                 </Button>
               </Link>
-              <Link to="/businesses">
+              <Link to="/student-businesses">
                 <Button variant="outline" className="w-full justify-start text-ktu-deep-blue hover:text-ktu-orange">
                   <Package className="w-4 h-4 mr-2" />
                   Other Student Businesses
