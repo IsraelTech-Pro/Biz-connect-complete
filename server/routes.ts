@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, insertProductSchema, insertOrderSchema, insertSupportRequestSchema, insertVendorSupportRequestSchema, insertPaymentSchema, insertDiscussionSchema, insertCommentSchema, insertLikeSchema, insertQuickSaleSchema, insertQuickSaleProductSchema, insertQuickSaleBidSchema, insertMentorSchema, insertProgramSchema, insertResourceSchema } from "@shared/schema";
+import { insertUserSchema, insertProductSchema, insertOrderSchema, insertSupportRequestSchema, insertVendorSupportRequestSchema, insertPaymentSchema, insertDiscussionSchema, insertCommentSchema, insertLikeSchema, insertQuickSaleSchema, insertQuickSaleProductSchema, insertQuickSaleBidSchema, insertMentorSchema, insertProgramSchema, insertResourceSchema, type InsertStudentRegistry } from "@shared/schema";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import multer from "multer";
@@ -210,6 +210,28 @@ const authenticateAdminToken = (req: Request, res: Response, next: NextFunction)
         return res.status(403).json({ message: 'Admin user not found or inactive' });
       }
       req.adminUser = adminUser;
+      // Map this admin to a users row and cache the id on the request for downstream usage
+      try {
+        const rawEmail = (adminUser as any).email as string | undefined;
+        const adminEmail = rawEmail && String(rawEmail).trim().length > 0
+          ? String(rawEmail).trim()
+          : `admin_${adminUser.id}@local.admin`;
+        let mapped = await storage.getUserByEmail(adminEmail);
+        if (!mapped) {
+          const random = Math.random().toString(36).slice(2) + Date.now().toString(36);
+          const hashed = await bcrypt.hash(random, 10);
+          mapped = await storage.createUser({
+            email: adminEmail,
+            password: hashed,
+            full_name: (adminUser as any).full_name || (adminUser as any).username || 'Admin User',
+            role: 'admin',
+            is_approved: true,
+          } as any);
+        }
+        (req as any).adminAsUserId = mapped.id;
+      } catch (mapErr) {
+        // If mapping fails, proceed; routes can still try their own fallback
+      }
       next();
     } catch (error) {
       console.error('Admin authentication error:', error);
@@ -220,6 +242,55 @@ const authenticateAdminToken = (req: Request, res: Response, next: NextFunction)
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
+  // Helper: broadcast email to all registered users
+  const notifyAll = async (subject: string, content: string) => {
+    try {
+      const allUsers = await storage.getUsers();
+      const html = buildBroadcastEmail(subject, content);
+      await Promise.allSettled(
+        allUsers
+          .map(u => String(u.email || '').trim())
+          .filter(e => !!e)
+          .map(email => sendEmailViaGAS(email, subject, html))
+      );
+    } catch (e) {
+      console.error('Broadcast notifyAll failed:', e);
+    }
+  };
+  // Seed Student Registry (idempotent upsert)
+  const seedStudents: InsertStudentRegistry[] = [
+    { student_id: '04/2021/4143d', full_name: 'Bright Asomani', program: 'Networking', year_of_study: 3, email: 'Bright0420214143d@ktu.edu.gh' },
+    { student_id: '04/2022/1152D', full_name: 'Kwesi Paa Gyan', program: 'Medical Laboratory', year_of_study: 4, email: 'Kewsi0420221152@ktu.edu.gh' },
+    { student_id: '04/2022/1155D', full_name: 'Courage Anani', program: 'Food Technology', year_of_study: 2, email: 'Courage0420221155d@ktu.edu.gh' },
+    { student_id: '04/2022/1156D', full_name: 'Ernest Ofosu-Dede', program: 'Computer science', year_of_study: 1, email: 'Ernest0420221156d@ktu.edu.gh' },
+  ];
+  try {
+    await storage.seedStudentRegistry(seedStudents);
+  } catch (e) {
+    console.error('Student registry seed error:', e);
+  }
+
+  // Seed initial user accounts for these students if they don't exist
+  try {
+    for (const s of seedStudents) {
+      const existing = await storage.getUserByEmail(s.email);
+      if (!existing) {
+        const hashed = await bcrypt.hash('ChangeMe123!', 10);
+        await storage.createUser({
+          email: s.email,
+          password: hashed,
+          full_name: s.full_name,
+          role: 'buyer',
+          student_id: s.student_id,
+          program: s.program,
+          year_of_study: s.year_of_study,
+          is_approved: true,
+        } as any);
+      }
+    }
+  } catch (e) {
+    console.error('Student users seed error:', e);
+  }
   
   // Serve uploaded files statically
   app.use('/uploads', express.static(uploadDir));
@@ -265,6 +336,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Admin login error:', error);
       return res.status(500).json({ message: 'Failed to login', error: message });
+    }
+  });
+
+  // Admin logout (client should clear token; this endpoint is for symmetry/analytics)
+  app.post('/api/admin/logout', authenticateAdminToken, async (_req: Request, res: Response) => {
+    try {
+      return res.json({ ok: true });
+    } catch (error) {
+      return res.status(500).json({ ok: false });
+    }
+  });
+
+  // Student Registry lookup routes (public)
+  app.get('/api/student-registry', async (req: Request, res: Response) => {
+    try {
+      const index = String((req.query.index || '')).trim();
+      if (!index) return res.status(400).json({ message: 'index is required' });
+      const row = await storage.getStudentByIndex(index);
+      if (!row) return res.status(404).json({ message: 'No student found for this index number' });
+      return res.json(row);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Student registry lookup error:', error);
+      return res.status(500).json({ message: 'Failed to lookup student', error: message });
+    }
+  });
+
+  app.get('/api/student-registry/:index', async (req: Request, res: Response) => {
+    try {
+      const index = String((req.params.index || '')).trim();
+      if (!index) return res.status(400).json({ message: 'index is required' });
+      const row = await storage.getStudentByIndex(index);
+      if (!row) return res.status(404).json({ message: 'No student found for this index number' });
+      return res.json(row);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Student registry lookup error:', error);
+      return res.status(500).json({ message: 'Failed to lookup student', error: message });
     }
   });
 
@@ -420,6 +529,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ktuEmailRegex = /^[^\s@]+@ktu\.edu\.gh$/;
       if (!ktuEmailRegex.test(userData.email)) {
         return res.status(400).json({ message: 'Only KTU students can register. Please use your official KTU email ending with @ktu.edu.gh' });
+      }
+      // If student_id provided, verify against registry and attach program/year
+      if (userData.student_id) {
+        const record = await storage.getStudentByIndex(String(userData.student_id));
+        if (!record) {
+          return res.status(400).json({ message: 'Student index not found. Please check your index number.' });
+        }
+        const emailOk = String(record.email || '').toLowerCase() === String(userData.email || '').toLowerCase();
+        if (!emailOk) {
+          return res.status(400).json({ message: 'Provided email does not match the student record for this index. Use your official KTU email.' });
+        }
+        // Prefer registry full_name if not provided
+        if (!userData.full_name) {
+          (userData as any).full_name = record.full_name;
+        }
+        (userData as any).program = record.program;
+        (userData as any).year_of_study = record.year_of_study;
       }
       // Require verified OTP before creating the account
       const otpRecord = otpStore.get(userData.email.toLowerCase());
@@ -599,44 +725,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/auth/login', async (req, res) => {
     try {
-      const { email, password } = req.body;
+      const { email, password } = req.body || {};
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
+      if (!emailRegex.test(String(email || ''))) {
         return res.status(400).json({ message: 'Invalid email format. Please use a valid email address (e.g., user@example.com)' });
       }
-      const user = await storage.getUserByEmail(email);
-      if (!user || !await bcrypt.compare(password, user.password)) {
+      const user = await storage.getUserByEmail(String(email).toLowerCase());
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      const ok = await bcrypt.compare(String(password || ''), user.password);
+      if (!ok) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
       if (!user.is_approved) {
-        return res.status(403).json({
-          message: 'Your account is not approved by the admin. Please contact the administrator for account activation.',
-          code: 'ACCOUNT_NOT_APPROVED',
-        });
+        return res.status(403).json({ message: 'Your account is not approved by the admin yet.' });
       }
-      const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET);
-      res.json({ user: { ...user, password: undefined }, token });
+      const token = jwt.sign({ id: user.id, type: 'user', role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+      return res.json({ token, user: { ...user, password: undefined } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('Login error:', error);
-      res.status(500).json({ message: 'Login failed', error: message });
-    }
-  });
-
-  app.get('/api/auth/me', authenticateToken, async (req, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ message: 'User not authenticated' });
-      }
-      const user = await storage.getUser(req.user.id);
-      if (!user) {
-        return res.status(404).json({ message: 'User not found' });
-      }
-      res.json({ ...user, password: undefined });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('Error fetching user:', error);
-      res.status(500).json({ message: 'Failed to get user', error: message });
+      console.error('Error during login:', error);
+      return res.status(500).json({ message: 'Failed to login', error: message });
     }
   });
 
@@ -825,6 +935,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching product:', error);
       res.status(500).json({ message: 'Failed to get product', error: message });
+    }
+  });
+
+  // Report a product (public)
+  app.post('/api/products/:productId/report', async (req, res) => {
+    try {
+      const { productId } = req.params;
+      const { reason, notes, reporter_email } = req.body || {};
+      if (!productId) {
+        return res.status(400).json({ message: 'productId is required' });
+      }
+      if (!reason || String(reason).trim().length < 3) {
+        return res.status(400).json({ message: 'Please provide a valid reason (min 3 characters).' });
+      }
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ message: 'Product not found' });
+      }
+      const row = await storage.createProductReport({
+        product_id: productId,
+        reason: String(reason).trim(),
+        notes: notes ? String(notes).trim() : null,
+        reporter_email: reporter_email ? String(reporter_email).trim() : null,
+      } as any);
+      return res.status(201).json({ ok: true, id: row.id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error reporting product:', error);
+      return res.status(500).json({ message: 'Failed to report product', error: message });
     }
   });
 
@@ -2202,7 +2341,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (body.mentor_id === '') body.mentor_id = null;
       const data = insertProgramSchema.parse(body);
       const created = await storage.createProgram(data);
-      res.json(created);
+      // Broadcast email to all users about the new mentorship program (mirror quick sale pattern)
+      try {
+        const subj = 'New Mentorship Program';
+        const base = process.env.APP_BASE_URL || (req.headers.origin as string) || 'http://localhost:5000';
+        const link = `${base.replace(/\/$/, '')}/mentorship`;
+        const bodyHtml = `A new mentorship program is now open: ${created.title || 'Mentorship Program'}<br/><br/>
+<a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;font-weight:600">View Mentorship Hub</a><br/>
+<div style="margin-top:8px;color:#94a3b8;font-size:12px">Or copy this link: ${link}</div>`;
+        await notifyAll(subj, bodyHtml);
+      } catch (e) {
+        console.error('Broadcast notifyAll (program) failed:', e);
+      }
+      res.status(201).json(created);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Error creating program:', error);
@@ -2410,6 +2561,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const data = insertResourceSchema.parse(req.body);
       const created = await storage.createResource(data as any);
+      // Broadcast email to all users about the new resource (mirror quick sale pattern)
+      try {
+        const subj = 'New Resource Available';
+        const base = process.env.APP_BASE_URL || (req.headers.origin as string) || 'http://localhost:5000';
+        const link = `${base.replace(/\/$/, '')}/resources/${created.id}`;
+        const bodyHtml = `A new business resource has been published: ${created.title || 'Resource'}<br/><br/>
+<a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;font-weight:600">View Resource</a><br/>
+<div style="margin-top:8px;color:#94a3b8;font-size:12px">Or copy this link: ${link}</div>`;
+        await notifyAll(subj, bodyHtml);
+      } catch (e) {
+        console.error('Broadcast notifyAll (resource) failed:', e);
+      }
       res.status(201).json(created);
     } catch (error: any) {
       console.error('Error creating resource:', error);
@@ -2698,17 +2861,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/admin/discussions', authenticateAdminToken, async (req: Request, res: Response) => {
     try {
-      // Admin can create discussions; author_id remains the admin user's id if present in storage
-      const tokenUser = (req as any).user;
+      // Mirror user flow but force author to the logged-in admin mapped users.id
+      let authorId: string | null = (req as any).adminAsUserId || null;
+      // Safety fallback: try email mapping if adminAsUserId missing
+      if (!authorId) {
+        try {
+          const adminUserObj = (req as any).adminUser;
+          const adminEmail = adminUserObj?.email && String(adminUserObj.email).trim().length > 0
+            ? String(adminUserObj.email).trim()
+            : `admin_${adminUserObj?.id || 'system'}@local.admin`;
+          if (adminEmail) {
+            const mapped = await storage.getUserByEmail(adminEmail);
+            if (mapped?.id) authorId = mapped.id;
+          }
+        } catch {}
+      }
+      if (!authorId) {
+        return res.status(400).json({ message: 'Unable to resolve admin author. Please re-login and try again.' });
+      }
+
       const payload = insertDiscussionSchema.parse({
         title: req.body.title,
         content: req.body.content,
         category: req.body.category,
         tags: Array.isArray(req.body.tags) ? req.body.tags : String(req.body.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean),
-        author_id: tokenUser?.id,
+        author_id: authorId,
         status: 'published',
       } as any);
       const created = await storage.createDiscussion(payload as any);
+      // Broadcast email to all users about the new discussion (mirror quick sale pattern)
+      try {
+        const subj = 'New Discussion';
+        const base = process.env.APP_BASE_URL || (req.headers.origin as string) || 'http://localhost:5000';
+        const link = `${base.replace(/\/$/, '')}/community`;
+        const bodyHtml = `A new discussion has been created: ${created.title || 'Discussion'}<br/><br/>
+<a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;font-weight:600">Go to Community</a><br/>
+<div style="margin-top:8px;color:#94a3b8;font-size:12px">Or copy this link: ${link}</div>`;
+        await notifyAll(subj, bodyHtml);
+      } catch (e) {
+        console.error('Broadcast notifyAll (discussion) failed:', e);
+      }
       res.status(201).json(created);
     } catch (error: any) {
       console.error('Error creating admin discussion:', error);
@@ -2777,6 +2969,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error deleting admin comment:', error);
       res.status(500).json({ message: 'Failed to delete comment' });
+    }
+  });
+
+  // Admin: Product Reports
+  app.get('/api/admin/product-reports', authenticateAdminToken, async (_req: Request, res: Response) => {
+    try {
+      const rows = await storage.listProductReports();
+      // rows already include product info and vendor (student business) info per storage implementation
+      res.json(rows || []);
+    } catch (error) {
+      console.error('Error listing product reports:', error);
+      res.status(500).json({ message: 'Failed to list product reports' });
+    }
+  });
+
+  app.get('/api/admin/product-reports/:id', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      const row = await storage.getProductReport(req.params.id);
+      if (!row) return res.status(404).json({ message: 'Report not found' });
+      res.json(row);
+    } catch (error) {
+      console.error('Error fetching product report:', error);
+      res.status(500).json({ message: 'Failed to fetch product report' });
+    }
+  });
+
+  app.post('/api/admin/product-reports/:id/resolve', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      const updated = await storage.resolveProductReport(req.params.id, req.body?.resolution_notes);
+      res.json(updated);
+    } catch (error) {
+      console.error('Error resolving product report:', error);
+      res.status(500).json({ message: 'Failed to resolve product report' });
+    }
+  });
+
+  app.delete('/api/admin/product-reports/:id', authenticateAdminToken, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteProductReport(req.params.id);
+      res.json({ message: 'Report deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting product report:', error);
+      res.status(500).json({ message: 'Failed to delete product report' });
     }
   });
 
@@ -3005,7 +3240,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/quick-sales', upload.any(), async (req, res) => {
     try {
-      const { title, description, seller_name, seller_contact, seller_email, ends_at, products: productsJson, reserve_price } = req.body;
+      const { title, description, seller_name, seller_contact, seller_email, location, ends_at, products: productsJson, reserve_price } = req.body;
       
       const products = JSON.parse(productsJson || '[]');
       
@@ -3083,6 +3318,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         seller_name,
         seller_contact,
         seller_email: seller_email || null,
+        location,
         starts_at: new Date(),
         ends_at: new Date(ends_at),
         status: 'active' as const,
@@ -3090,12 +3326,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const validatedQuickSale = insertQuickSaleSchema.parse(quickSaleData);
-      
+
       const sale = await storage.createQuickSale(validatedQuickSale, productsWithImages);
-      
+
+      // Broadcast email to all users about the new quick sale
+      try {
+        const subj = 'New Quick Sale';
+        const base = process.env.APP_BASE_URL || (req.headers.origin as string) || 'http://localhost:5000';
+        const link = `${base.replace(/\/$/, '')}/quick-sale/${sale.id}`;
+        const body = `A new quick sale is live: ${title}<br/><br/>
+<a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;font-weight:600">View Quick Sale</a><br/>
+<div style="margin-top:8px;color:#94a3b8;font-size:12px">Or copy this link: ${link}</div>`;
+        await notifyAll(subj, body);
+      } catch (e) {
+        console.warn('Quick sale notifyAll failed:', e);
+      }
+
       res.status(201).json(sale);
     } catch (error: any) {
       console.error('Error creating quick sale:', error);
+      // Format Zod errors nicely if present
+      const zodIssues = (error && error.issues && Array.isArray(error.issues)) ? error.issues : null;
+      if (zodIssues) {
+        const msg = zodIssues.map((i: any) => i.message).join('; ');
+        return res.status(400).json({ message: msg || 'Validation failed' });
+      }
       res.status(400).json({ message: error.message || 'Failed to create quick sale' });
     }
   });

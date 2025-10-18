@@ -197,6 +197,22 @@ export default function AdminDashboard() {
     await handleUserEdit(userId, { role: newRole });
   };
 
+  const handleLogout = async () => {
+    try {
+      const adminToken = localStorage.getItem('admin_token');
+      if (adminToken) {
+        await fetch('/api/admin/logout', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${adminToken}` }
+        }).catch(() => {});
+      }
+    } finally {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_user');
+      setLocation('/admin/login');
+    }
+  };
+
   const handleBusinessView = (businessId: string) => {
     const business = businesses.find(b => b.id === businessId);
     if (business) {
@@ -547,6 +563,13 @@ export default function AdminDashboard() {
       color: "bg-purple-600",
       action: "/admin/resources"
     },
+    {
+      title: "Product Reports",
+      description: "View and resolve product reports",
+      icon: Shield,
+      color: "bg-emerald-600",
+      action: "/admin/product-reports"
+    },
 
   ];
 
@@ -590,6 +613,7 @@ export default function AdminDashboard() {
               </p>
             </div>
             <div className="flex space-x-4">
+              <Button variant="outline" onClick={handleLogout}>Logout</Button>
             </div>
           </div>
         </motion.div>

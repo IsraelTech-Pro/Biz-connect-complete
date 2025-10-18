@@ -97,7 +97,7 @@ export default function ProductsListing() {
   }, [location]);
 
   // Fetch products
-  const { data: products = [], isLoading } = useQuery({
+  const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ['/api/products'],
   });
 
@@ -117,6 +117,7 @@ export default function ProductsListing() {
   // Sort options
   const sortOptions = [
     { value: 'newest', label: 'Newest First' },
+    { value: 'oldest', label: 'Oldest First' },
     { value: 'price-low', label: 'Price: Low to High' },
     { value: 'price-high', label: 'Price: High to Low' },
     { value: 'rating', label: 'Highest Rated' },
@@ -144,7 +145,8 @@ export default function ProductsListing() {
     image: product.image_url || "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=250&fit=crop",
     rating: parseFloat(product.rating_average || "4.5"),
     reviews: product.rating_count || 10,
-    stock: product.stock_quantity
+    stock: product.stock_quantity,
+    created_at: product.created_at
   }));
 
   // Use only real data from database
@@ -175,6 +177,10 @@ export default function ProductsListing() {
   // Sort products
   const sortedProducts = [...filteredProducts].sort((a, b) => {
     switch (sortBy) {
+      case 'newest':
+        return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+      case 'oldest':
+        return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
       case 'price-low':
         return parseFloat(a.price) - parseFloat(b.price);
       case 'price-high':
@@ -184,7 +190,7 @@ export default function ProductsListing() {
       case 'popular':
         return b.reviews - a.reviews;
       default:
-        return 0;
+        return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
     }
   });
 

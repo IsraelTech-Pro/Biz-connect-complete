@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Package, Phone, Mail, Trophy } from "lucide-react";
+import { Clock, Package, Phone, Mail, Trophy, MapPin } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -168,6 +168,9 @@ export default function QuickSaleDetail() {
 
   const highestBid = sale.bids && sale.bids.length > 0 ? sale.bids[0] : null;
   const isActive = sale.status === 'active' && new Date(sale.ends_at) > new Date();
+  const locationMatch = (sale.description || '').match(/Location:\s*(.+)/i);
+  const saleLocation = locationMatch ? locationMatch[1].trim() : '';
+  const cleanDescription = (sale.description || '').split(/\r?\n/).filter(line => !/^\s*Location:/i.test(line)).join('\n');
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -188,7 +191,7 @@ export default function QuickSaleDetail() {
                 {sale.title}
               </h1>
               
-              <p className="text-gray-600 mb-6">{sale.description}</p>
+              <p className="text-gray-600 whitespace-pre-line mb-6">{cleanDescription}</p>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -199,6 +202,12 @@ export default function QuickSaleDetail() {
                   <p className="text-sm text-gray-600">Contact</p>
                   <p className="font-semibold">{sale.seller_contact}</p>
                 </div>
+                {saleLocation && (
+                  <div className="col-span-2">
+                    <p className="text-sm text-gray-600">Location</p>
+                    <p className="font-semibold flex items-center gap-1"><MapPin className="h-4 w-4 text-gray-500" /> {saleLocation}</p>
+                  </div>
+                )}
                 {sale.seller_email && (
                   <div className="col-span-2">
                     <p className="text-sm text-gray-600">Email</p>

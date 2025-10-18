@@ -9,6 +9,10 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   full_name: text("full_name").notNull(),
   role: text("role").notNull().default("buyer"), // buyer, vendor, admin
+  // Student metadata (optional but recommended)
+  student_id: text("student_id"), // KTU index number e.g. 04/2021/4143d
+  program: text("program"),
+  year_of_study: integer("year_of_study"),
   business_name: text("business_name"),
   business_description: text("business_description"),
   business_category: text("business_category"),
@@ -23,6 +27,30 @@ export const users = pgTable("users", {
   is_approved: boolean("is_approved").default(false),
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow(),
+});
+
+// Product reports table (users can report problematic products)
+export const product_reports = pgTable("product_reports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  product_id: uuid("product_id").notNull().references(() => products.id),
+  reporter_email: text("reporter_email"),
+  reason: text("reason").notNull(),
+  notes: text("notes"),
+  resolved: boolean("resolved").default(false),
+  resolution_notes: text("resolution_notes"),
+  resolved_at: timestamp("resolved_at"),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+// Student registry to validate applicants by index number
+export const student_registry = pgTable("student_registry", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  student_id: text("student_id").notNull().unique(),
+  full_name: text("full_name").notNull(),
+  program: text("program").notNull(),
+  year_of_study: integer("year_of_study").notNull(),
+  email: text("email").notNull().unique(),
+  created_at: timestamp("created_at").defaultNow(),
 });
 
 export const products = pgTable("products", {
@@ -176,6 +204,7 @@ export const quick_sales = pgTable("quick_sales", {
   description: text("description").notNull(),
   seller_name: text("seller_name").notNull(),
   seller_contact: text("seller_contact").notNull(),
+  location: text("location").notNull(),
   seller_email: text("seller_email"),
   starts_at: timestamp("starts_at").notNull(),
   ends_at: timestamp("ends_at").notNull(),
@@ -208,6 +237,11 @@ export const quick_sale_bids = pgTable("quick_sale_bids", {
 
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  created_at: true,
+});
+
+export const insertStudentRegistrySchema = createInsertSchema(student_registry).omit({
   id: true,
   created_at: true,
 });
@@ -264,6 +298,7 @@ export const insertQuickSaleSchema = createInsertSchema(quick_sales).omit({
   description: z.string().min(10, "Description must be at least 10 characters"),
   seller_name: z.string().min(2, "Seller name is required"),
   seller_contact: z.string().min(10, "Valid contact number is required"),
+  location: z.string().min(1, "Location is required"),
   ends_at: z.date().or(z.string()),
   starts_at: z.date().or(z.string()),
 });
@@ -382,6 +417,8 @@ export const insertResourceSchema = createInsertSchema(resources).omit({
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type StudentRegistry = typeof student_registry.$inferSelect;
+export type InsertStudentRegistry = z.infer<typeof insertStudentRegistrySchema>;
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 export type Order = typeof orders.$inferSelect;
@@ -463,12 +500,20 @@ export const insertProductRatingSchema = createInsertSchema(productRatings).omit
   updated_at: true,
 });
 
+// Insert schema for product reports
+export const insertProductReportSchema = createInsertSchema(product_reports).omit({
+  id: true,
+  created_at: true,
+});
+
 export type AdminUser = typeof adminUsers.$inferSelect;
 export type InsertAdminUser = z.infer<typeof insertAdminUserSchema>;
 export type BusinessRating = typeof businessRatings.$inferSelect;
 export type InsertBusinessRating = z.infer<typeof insertBusinessRatingSchema>;
 export type ProductRating = typeof productRatings.$inferSelect;
 export type InsertProductRating = z.infer<typeof insertProductRatingSchema>;
+export type ProductReport = typeof product_reports.$inferSelect;
+export type InsertProductReport = z.infer<typeof insertProductReportSchema>;
 
 // Community discussions table
 export const discussions = pgTable("discussions", {

@@ -13,6 +13,7 @@ import {
   Check,
   ArrowLeft,
   MessageCircle,
+  Flag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import type { Product, User } from "@shared/schema";
 import { ProductRating } from "@/components/product-rating";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -48,7 +51,43 @@ export default function ProductDetail() {
     enabled: !!product?.vendor_id,
   });
 
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportNotes, setReportNotes] = useState("");
+  const [reportContact, setReportContact] = useState("");
+  const [reporting, setReporting] = useState(false);
 
+  const submitReport = async () => {
+    if (!product) return;
+    if (!reportReason.trim() || reportReason.trim().length < 3) {
+      toast({ title: "Reason required", description: "Please provide a short reason.", variant: "destructive" });
+      return;
+    }
+    try {
+      setReporting(true);
+      const resp = await fetch(`/api/products/${product.id}/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: reportReason.trim(),
+          notes: reportNotes.trim() || undefined,
+          reporter_email: reportContact.trim() || undefined,
+        })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.message || 'Failed to report product');
+      toast({ title: 'Report sent', description: 'Thank you. Our admins will review this product.' });
+      setReportOpen(false);
+      setReportReason("");
+      setReportNotes("");
+      setReportContact("");
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to report product', variant: 'destructive' });
+    } finally {
+      setReporting(false);
+    }
+  };
 
   const handleShare = async () => {
     if (!product) return;
@@ -188,7 +227,7 @@ export default function ProductDetail() {
                         : "/api/placeholder/600/600"
                     }
                     alt={product.title}
-                    className="w-full h-80 lg:h-96 object-cover rounded-lg border"
+                    className="w-full h-80 lg:h-96 object-contain rounded-lg border bg-white"
                   />
                 </div>
 
@@ -287,6 +326,15 @@ export default function ProductDetail() {
                       <Share2 className="mr-2 h-4 w-4" />
                       Share Product
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => setReportOpen(true)}
+                    >
+                      <Flag className="mr-2 h-4 w-4" />
+                      Report
+                    </Button>
                   </div>
                 </div>
 
@@ -310,9 +358,12 @@ export default function ProductDetail() {
                           <p className="font-medium text-sm">
                             {vendor.business_name || vendor.full_name}
                           </p>
-                          <p className="text-xs text-gray-600">
-                            KTU Student Entrepreneur
-                          </p>
+                          <p className="text-xs text-gray-600">KTU Student Entrepreneur</p>
+                          {vendor.address && (
+                            <p className="text-xs text-gray-600 flex items-center mt-1">
+                              <MapPin className="h-3 w-3 mr-1" /> {vendor.address}
+                            </p>
+                          )}
                         </div>
                         <Button variant="outline" size="sm">
                           Visit Store
@@ -328,108 +379,55 @@ export default function ProductDetail() {
                     </CardContent>
                   </Card>
                 )}
-              </div>
-            </div>
-          </div>
-
-          {/* Product Details Tabs */}
-          <div className="mt-8">
-            <Card>
-              <CardContent className="p-0">
-                <Tabs defaultValue="details" className="w-full">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="details">Product Details</TabsTrigger>
-                    <TabsTrigger value="specs">Specifications</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="details" className="p-6">
-                    <div className="space-y-4">
-                      <h3 className="font-semibold text-lg">
-                        Product Description
-                      </h3>
-                      <p className="text-gray-700 leading-relaxed">
-                        {product.description}
-                      </p>
-
-                      {product.tags && product.tags.length > 0 && (
-                        <div className="mt-6">
-                          <h4 className="font-medium mb-2">Product Tags</h4>
-                          <div className="flex flex-wrap gap-2">
-                            {product.tags.map((tag, index) => (
-                              <span
-                                key={index}
-                                className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="specs" className="p-6">
-                    <div className="space-y-4">
-                      <h3 className="font-semibold text-lg">Specifications</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-3">
-                          <div className="flex justify-between py-2 border-b">
-                            <span className="text-gray-600">Product ID:</span>
-                            <span className="font-medium">
-                              {product.id.slice(0, 8)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between py-2 border-b">
-                            <span className="text-gray-600">Category:</span>
-                            <span className="font-medium">
-                              {product.category}
-                            </span>
-                          </div>
-
-                          {product.weight && (
-                            <div className="flex justify-between py-2 border-b">
-                              <span className="text-gray-600">Weight:</span>
-                              <span className="font-medium">
-                                {product.weight} kg
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-3">
-                          <div className="flex justify-between py-2 border-b">
-                            <span className="text-gray-600">Vendor:</span>
-                            <span className="font-medium">
-                              {vendor?.business_name ||
-                                vendor?.full_name ||
-                                "KTU BizConnect"}
-                            </span>
-                          </div>
-                          {product.sku && (
-                            <div className="flex justify-between py-2 border-b">
-                              <span className="text-gray-600">SKU:</span>
-                              <span className="font-medium">{product.sku}</span>
-                            </div>
-                          )}
-                          {product.dimensions && (
-                            <div className="flex justify-between py-2 border-b">
-                              <span className="text-gray-600">Dimensions:</span>
-                              <span className="font-medium">
-                                {product.dimensions}
-                              </span>
-                            </div>
-                          )}
-
-                        </div>
-                      </div>
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
           </div>
         </div>
       </div>
+
+      {/* Report Product Modal */}
+      <Dialog open={reportOpen} onOpenChange={(v) => { setReportOpen(v); if (!v) { setReportReason(""); setReportNotes(""); setReportContact(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Report this product</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+              <input
+                className="w-full border rounded px-3 py-2 text-sm"
+                placeholder="e.g., Counterfeit, wrong info, fraud"
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Your Email or Phone (optional)</label>
+              <input
+                className="w-full border rounded px-3 py-2 text-sm"
+                placeholder="you@example.com or 024xxxxxxx"
+                value={reportContact}
+                onChange={(e) => setReportContact(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <Textarea
+                placeholder="Provide more details if necessary"
+                value={reportNotes}
+                onChange={(e) => setReportNotes(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setReportOpen(false)}>Cancel</Button>
+              <Button onClick={submitReport} disabled={reporting} className="btn-orange-primary">
+                {reporting ? 'Submitting...' : 'Submit Report'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      </div>
+    </div>
     </div>
   );
 }

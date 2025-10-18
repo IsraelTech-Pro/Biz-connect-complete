@@ -35,6 +35,7 @@ export default function CreateQuickSale() {
   const [sellerEmail, setSellerEmail] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [reservePrice, setReservePrice] = useState("");
+  const [sellerLocation, setSellerLocation] = useState("");
 
   // Products
   const [products, setProducts] = useState<Product[]>([
@@ -139,6 +140,7 @@ export default function CreateQuickSale() {
       formData.append('seller_name', sellerName);
       formData.append('seller_contact', sellerContact);
       formData.append('seller_email', sellerEmail);
+      formData.append('location', sellerLocation);
       formData.append('ends_at', endsAt);
       if (reservePrice) {
         formData.append('reserve_price', reservePrice);
@@ -249,6 +251,17 @@ export default function CreateQuickSale() {
                     data-testid="input-seller-contact"
                   />
                 </div>
+              </div>
+
+              <div>
+                <Label htmlFor="seller_location">Location (Optional)</Label>
+                <Input
+                  id="seller_location"
+                  value={sellerLocation}
+                  onChange={(e) => setSellerLocation(e.target.value)}
+                  placeholder="e.g., Koforidua, Campus, Hall"
+                  data-testid="input-seller-location"
+                />
               </div>
 
               <div>

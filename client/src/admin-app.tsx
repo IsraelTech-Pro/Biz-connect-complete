@@ -20,6 +20,7 @@ import ResourcesList from "./pages/admin/resources/list";
 import AdminVendors from "@/pages/admin/vendors";
 import AdminSettings from "@/pages/admin/settings";
 import AdminDiscussions from "./pages/admin/community/discussions";
+import AdminProductReports from "./pages/admin/product-reports";
 import AdminProfile from "./pages/admin/admin-profile";
 import AdminQuickSales from "./pages/admin/admin-quick-sales";
 import NotFound from "@/pages/not-found";
@@ -43,6 +44,7 @@ function AdminRouter() {
       <Route path="/admin/vendors" component={AdminVendors} />
       <Route path="/admin/settings" component={AdminSettings} />
       <Route path="/admin/community/discussions" component={AdminDiscussions} />
+      <Route path="/admin/product-reports" component={AdminProductReports} />
       <Route path="/admin/quick-sales" component={AdminQuickSales} />
       <Route component={NotFound} />
     </Switch>

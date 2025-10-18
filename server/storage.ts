@@ -1,4 +1,4 @@
-import { users, products, orders, payouts, platform_settings, support_requests, vendor_support_requests, payments, transactions, mentors, programs, resources, adminUsers, discussions, comments, likes, businessRatings, productRatings, quick_sales, quick_sale_products, quick_sale_bids, type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type Payout, type InsertPayout, type PlatformSettings, type SupportRequest, type InsertSupportRequest, type VendorSupportRequest, type InsertVendorSupportRequest, type Payment, type InsertPayment, type Mentor, type InsertMentor, type Program, type InsertProgram, type Resource, type InsertResource, type AdminUser, type InsertAdminUser, type Discussion, type InsertDiscussion, type Comment, type InsertComment, type Like, type InsertLike, type BusinessRating, type InsertBusinessRating, type ProductRating, type InsertProductRating, type QuickSale, type InsertQuickSale, type QuickSaleProduct, type InsertQuickSaleProduct, type QuickSaleBid, type InsertQuickSaleBid } from "@shared/schema";
+import { users, products, orders, payouts, platform_settings, support_requests, vendor_support_requests, payments, transactions, mentors, programs, resources, adminUsers, discussions, comments, likes, businessRatings, productRatings, product_reports, quick_sales, quick_sale_products, quick_sale_bids, student_registry, type User, type InsertUser, type Product, type InsertProduct, type Order, type InsertOrder, type Payout, type InsertPayout, type PlatformSettings, type SupportRequest, type InsertSupportRequest, type VendorSupportRequest, type InsertVendorSupportRequest, type Payment, type InsertPayment, type Mentor, type InsertMentor, type Program, type InsertProgram, type Resource, type InsertResource, type AdminUser, type InsertAdminUser, type Discussion, type InsertDiscussion, type Comment, type InsertComment, type Like, type InsertLike, type BusinessRating, type InsertBusinessRating, type ProductRating, type InsertProductRating, type ProductReport, type InsertProductReport, type QuickSale, type InsertQuickSale, type QuickSaleProduct, type InsertQuickSaleProduct, type QuickSaleBid, type InsertQuickSaleBid, type StudentRegistry, type InsertStudentRegistry } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, and, desc, sql, like, or } from "drizzle-orm";
 import pg from "pg";
@@ -111,6 +111,9 @@ export interface IStorage {
   
   // Users lookup
   getUsers(): Promise<User[]>;
+  // Student Registry
+  getStudentByIndex(index: string): Promise<StudentRegistry | undefined>;
+  seedStudentRegistry(records: InsertStudentRegistry[]): Promise<number>;
   
   // Admin management methods
   // Mentors
@@ -193,6 +196,13 @@ export interface IStorage {
     totalRatings: number;
   }>;
 
+  // Product Reports
+  createProductReport(report: InsertProductReport): Promise<ProductReport>;
+  listProductReports(): Promise<any[]>;
+  getProductReport(id: string): Promise<any | undefined>;
+  resolveProductReport(id: string, resolution_notes?: string): Promise<any>;
+  deleteProductReport(id: string): Promise<void>;
+
   // Quick Sales / Auctions
   getQuickSales(status?: 'active' | 'ended' | 'cancelled'): Promise<any[]>;
   getQuickSale(id: string): Promise<any | undefined>;
@@ -219,6 +229,91 @@ export class PostgresStorage implements IStorage {
     if (!db) throw new Error('Database not available');
     const result = await db.select().from(users).where(eq(users.id, id));
     return result[0];
+  }
+
+  async createProductReport(report: InsertProductReport): Promise<ProductReport> {
+    if (!db) throw new Error('Database not available');
+    const [row] = await db.insert(product_reports).values(report).returning();
+    return row;
+  }
+
+  async listProductReports(): Promise<any[]> {
+    if (!db) throw new Error('Database not available');
+    const rows = await db
+      .select({
+        id: product_reports.id,
+        product_id: product_reports.product_id,
+        reporter_email: product_reports.reporter_email,
+        reason: product_reports.reason,
+        notes: product_reports.notes,
+        resolved: product_reports.resolved,
+        resolution_notes: product_reports.resolution_notes,
+        resolved_at: product_reports.resolved_at,
+        created_at: product_reports.created_at,
+        product_title: products.title,
+        product_status: products.status,
+        product_price: products.price,
+        product_image_url: products.image_url,
+        vendor_id: users.id,
+        vendor_name: users.full_name,
+        vendor_business: users.business_name,
+        vendor_phone: users.phone,
+        vendor_whatsapp: users.whatsapp,
+      })
+      .from(product_reports)
+      .leftJoin(products, eq(product_reports.product_id, products.id))
+      .leftJoin(users, eq(products.vendor_id, users.id))
+      .orderBy(desc(product_reports.created_at));
+    return rows;
+  }
+
+  async getProductReport(id: string): Promise<any | undefined> {
+    if (!db) throw new Error('Database not available');
+    const rows = await db
+      .select({
+        id: product_reports.id,
+        product_id: product_reports.product_id,
+        reporter_email: product_reports.reporter_email,
+        reason: product_reports.reason,
+        notes: product_reports.notes,
+        resolved: product_reports.resolved,
+        resolution_notes: product_reports.resolution_notes,
+        resolved_at: product_reports.resolved_at,
+        created_at: product_reports.created_at,
+        product_title: products.title,
+        product_status: products.status,
+        product_price: products.price,
+        product_image_url: products.image_url,
+        product_images: products.product_images,
+        vendor_id: users.id,
+        vendor_name: users.full_name,
+        vendor_email: users.email,
+        vendor_business: users.business_name,
+        vendor_phone: users.phone,
+        vendor_whatsapp: users.whatsapp,
+        vendor_address: users.address,
+      })
+      .from(product_reports)
+      .leftJoin(products, eq(product_reports.product_id, products.id))
+      .leftJoin(users, eq(products.vendor_id, users.id))
+      .where(eq(product_reports.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  async resolveProductReport(id: string, resolution_notes?: string): Promise<any> {
+    if (!db) throw new Error('Database not available');
+    const [row] = await db
+      .update(product_reports)
+      .set({ resolved: true, resolution_notes: resolution_notes || null, resolved_at: new Date() })
+      .where(eq(product_reports.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteProductReport(id: string): Promise<void> {
+    if (!db) throw new Error('Database not available');
+    await db.delete(product_reports).where(eq(product_reports.id, id));
   }
 
   async deleteQuickSale(id: string): Promise<void> {
@@ -621,6 +716,30 @@ export class PostgresStorage implements IStorage {
   async getUsers(): Promise<User[]> {
     if (!db) throw new Error('Database not available');
     return await db.select().from(users);
+  }
+
+  async getStudentByIndex(index: string): Promise<StudentRegistry | undefined> {
+    if (!db) throw new Error('Database not available');
+    const norm = String(index).trim().toLowerCase();
+    const result = await db.select().from(student_registry).where(sql`LOWER(${student_registry.student_id}) = ${norm}`).limit(1);
+    return result[0];
+  }
+
+  async seedStudentRegistry(records: InsertStudentRegistry[]): Promise<number> {
+    if (!db) throw new Error('Database not available');
+    if (!Array.isArray(records) || records.length === 0) return 0;
+    // Upsert by student_id
+    const values = records.map(r => ({
+      student_id: r.student_id,
+      full_name: r.full_name,
+      program: r.program,
+      year_of_study: r.year_of_study,
+      email: r.email,
+    }));
+    await db.execute(sql`INSERT INTO student_registry (student_id, full_name, program, year_of_study, email)
+      VALUES ${sql.join(values.map(v => sql`(${v.student_id}, ${v.full_name}, ${v.program}, ${v.year_of_study}, ${v.email})`), sql`, `)}
+      ON CONFLICT (student_id) DO UPDATE SET full_name = EXCLUDED.full_name, program = EXCLUDED.program, year_of_study = EXCLUDED.year_of_study, email = EXCLUDED.email`);
+    return values.length;
   }
 
   // Admin management implementations

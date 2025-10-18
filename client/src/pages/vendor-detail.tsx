@@ -514,7 +514,7 @@ export default function VendorDetail() {
                     <div className="space-y-2 text-sm text-gray-600">
                       <div className="flex items-center">
                         <MapPin className="w-4 h-4 mr-2" />
-                        Ghana
+                        {vendor.address || 'Ghana'}
                       </div>
                       <div className="flex items-center">
                         <Store className="w-4 h-4 mr-2" />
