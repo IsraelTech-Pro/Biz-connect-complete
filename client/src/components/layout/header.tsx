@@ -40,6 +40,8 @@ export const Header = () => {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const { user, logout } = useAuth();
   const searchRef = useRef<HTMLDivElement>(null);
+  const [showProgramBanner, setShowProgramBanner] = useState(false);
+  const [unseenProgramIds, setUnseenProgramIds] = useState<string[]>([]);
 
   // Debounce search query
   useEffect(() => {
@@ -58,6 +60,26 @@ export const Header = () => {
     queryKey: [`/api/search?q=${debouncedQuery}`],
     enabled: debouncedQuery.length > 2,
   });
+
+  const { data: programs } = useQuery<any[]>({
+    queryKey: ['/api/programs'],
+    queryFn: async () => {
+      const resp = await fetch('/api/programs');
+      if (!resp.ok) throw new Error('failed');
+      return resp.json();
+    }
+  });
+
+  useEffect(() => {
+    const ids = Array.isArray(programs) ? programs.map((p: any) => String(p.id)) : [];
+    setUnseenProgramIds(ids);
+    setShowProgramBanner(ids.length > 0);
+  }, [programs]);
+
+  const markProgramsSeen = () => {
+    // Hide for current session/view only; on refresh, reminder will show again
+    setShowProgramBanner(false);
+  };
 
   // Handle clicking outside search results
   useEffect(() => {
@@ -141,6 +163,20 @@ export const Header = () => {
           </div>
         </div>
       </div>
+
+      {showProgramBanner && (
+        <div className="bg-orange-50 border-b border-orange-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between">
+            <div className="text-sm text-orange-800 font-medium">
+              New mentorship programs are available. Stay informed and apply early.
+            </div>
+            <div className="flex items-center space-x-2">
+              <Link to="/programs" className="bg-ktu-orange hover:bg-ktu-orange-light text-white px-3 py-1 rounded text-sm">View</Link>
+              <button onClick={markProgramsSeen} className="text-orange-700 hover:text-orange-900 text-sm px-2 py-1">Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
@@ -285,6 +321,15 @@ export const Header = () => {
               >
                 <Search className="h-4 w-4" />
               </Button>
+
+              <Link to="/programs">
+                <Button variant="ghost" size="sm" className="relative px-2 py-2 hover:bg-orange-50">
+                  <Bell className="h-4 w-4" />
+                  {unseenProgramIds.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-orange-600 text-white rounded-full text-[10px] leading-none px-1 py-0.5">{unseenProgramIds.length}</span>
+                  )}
+                </Button>
+              </Link>
 
               {/* Account */}
               <div className="relative group">

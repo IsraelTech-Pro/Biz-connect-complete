@@ -103,6 +103,7 @@ export default function AdminProductReports() {
   };
 
   return (
+    <>
     <div className="min-h-screen bg-ktu-grey py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between mb-6">
@@ -166,7 +167,7 @@ export default function AdminProductReports() {
                         </td>
                         <td className="py-2 pr-4">
                           <div className="flex items-center space-x-2">
-                            <Button size="sm" variant="outline" onClick={() => viewReport(r.id)}>View</Button>
+                            <Button size="sm" className="bg-ktu-orange hover:bg-orange-600 text-white" onClick={() => viewReport(r.id)} aria-label="View details">View</Button>
                             {!r.resolved && (
                               <Button size="sm" onClick={() => resolveReport(r.id)}>Resolve</Button>
                             )}
@@ -183,5 +184,56 @@ export default function AdminProductReports() {
         </Card>
       </div>
     </div>
+    <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Product Report Details</DialogTitle>
+        </DialogHeader>
+        {viewLoading ? (
+          <p className="text-sm text-gray-500">Loading...</p>
+        ) : !viewData ? (
+          <p className="text-sm text-gray-500">No details loaded</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-start space-x-4">
+              {viewData.product_image_url && (
+                <img src={viewData.product_image_url} alt="" className="w-24 h-24 object-cover rounded" />
+              )}
+              <div>
+                <div className="font-semibold text-gray-900">{viewData.product_title || '—'}</div>
+                <div className="text-xs text-gray-500">Product #{viewData.product_id?.slice(0, 8)}</div>
+                <div className="text-xs text-gray-500">Price: ₵{viewData.product_price ?? 0}</div>
+                <div className="text-xs text-gray-500">Status: {viewData.product_status || '—'}</div>
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-900">Reporter: {viewData.reporter_email}</div>
+              <div className="text-sm text-gray-900">Reason: {viewData.reason}</div>
+              {viewData.notes && <div className="text-sm text-gray-600">Notes: {viewData.notes}</div>}
+            </div>
+            <div>
+              <div className="font-semibold text-gray-900">Student Business</div>
+              <div className="text-sm text-gray-900">{viewData.vendor_business || '—'}</div>
+              <div className="text-xs text-gray-500">Owner: {viewData.vendor_name || '—'}</div>
+              <div className="text-xs text-gray-500">Contact: {viewData.vendor_phone || viewData.vendor_whatsapp || '—'}</div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Badge className={viewData.resolved ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
+                {viewData.resolved ? 'Resolved' : 'Pending'}
+              </Badge>
+              {viewData.resolution_notes && <span className="text-xs text-gray-600">{viewData.resolution_notes}</span>}
+            </div>
+            <div className="flex justify-end space-x-2">
+              {!viewData.resolved && (
+                <Button size="sm" onClick={() => { setViewOpen(false); resolveReport(viewData.id); }}>Resolve</Button>
+              )}
+              <Button size="sm" variant="destructive" onClick={() => { setViewOpen(false); deleteReport(viewData.id); }}>Delete</Button>
+              <Button size="sm" variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

@@ -92,6 +92,7 @@ function Router() {
       {/* Public browsing routes - no authentication required */}
       <Route path="/" component={KTUHome} />
       <Route path="/mentorship" component={MentorshipHub} />
+      <Route path="/programs" component={MentorshipHub} />
       <Route path="/resources" component={BusinessResources} />
       <Route path="/resources/:id" component={ResourceDetail} />
       <Route path="/community" component={CommunityForum} />
